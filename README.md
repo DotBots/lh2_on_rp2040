@@ -32,3 +32,10 @@ make
 ```
 
 5. Flash the `lh2_receiver.uf2` file to the microcontroller/
+
+
+## References
+
+- How to change the CPU system clock, with `set_sys_clock_khz(128000, true)` [Link](https://forums.raspberrypi.com/viewtopic.php?t=301902)
+  - this function is available from stdlib.h
+  - The script `pico-sdk/src/rp2_common/hardware_clocks/scripts/vcocalc.py` confirms that 128MHz is an achievable frequency.
