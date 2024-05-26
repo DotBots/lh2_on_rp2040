@@ -1,0 +1,68 @@
+;
+; Copyright (c) 2021 Raspberry Pi (Trading) Ltd.
+;
+; SPDX-License-Identifier: BSD-3-Clause
+;
+
+.program ts4231_capture
+; Sample the data line of the TS4231 at 32MHz each time the envelope line goes low 
+; 
+;
+; - IN pin 0 is the data pin
+; - IN pin 1 is the envelope pin
+; - Autopush is enabled, threshold 32
+; - Clock should be 128MHz
+;
+; This program samples the data line  at 32MHz for exactly 64bytes (512 bits), and shift it out to the RX FIFO.
+
+.define D 0
+.define E 1
+
+    ; prepare 2 variables to count the 512 bits that need to be sampled
+    set x, 31               ; this is enough for a 32 iteration loop
+    set y, 15
+    ; wait for the Envelope line to go down
+    wait 0 pin E
+    jmp 0 inner_loop
+
+outer_loop:
+    set x, 30  [1]          ; recharge the inner loop counter, recharge to 30
+inner_loop:
+    in pins, 1  [2]         ; sample the data lines, once.
+    jmp x-- inner_loop      ; go back to sample another bit
+    in pins, 1
+    jmp y-- outer_loop      ; go back to sample the next 32 bit word
+
+
+    wait 1 pin E            ; wait for the line to go up again before  start sampling again
+
+
+; % c-sdk {
+; static inline void clocked_input_program_init(PIO pio, uint sm, uint offset, uint pin) {
+;     pio_sm_config c = clocked_input_program_get_default_config(offset);
+
+;     // Set the IN base pin to the provided `pin` parameter. This is the data
+;     // pin, and the next-numbered GPIO is used as the clock pin.
+;     sm_config_set_in_pins(&c, pin);
+;     // Set the pin directions to input at the PIO
+;     pio_sm_set_consecutive_pindirs(pio, sm, pin, 2, false);
+;     // Connect these GPIOs to this PIO block
+;     pio_gpio_init(pio, pin);
+;     pio_gpio_init(pio, pin + 1);
+
+;     // Shifting to left matches the customary MSB-first ordering of SPI.
+;     sm_config_set_in_shift(
+;         &c,
+;         false, // Shift-to-right = false (i.e. shift to left)
+;         true,  // Autopush enabled
+;         8      // Autopush threshold = 8
+;     );
+
+;     // We only receive, so disable the TX FIFO to make the RX FIFO deeper.
+;     sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_RX);
+
+;     // Load our configuration, and start the program from the beginning
+;     pio_sm_init(pio, sm, offset, &c);
+;     pio_sm_set_enabled(pio, sm, true);
+; }
+; %}
