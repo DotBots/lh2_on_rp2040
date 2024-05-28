@@ -23,46 +23,46 @@
     set y, 15
     ; wait for the Envelope line to go down
     wait 0 pin E
-    jmp 0 inner_loop
+    jmp inner_loop
 
 outer_loop:
-    set x, 30  [1]          ; recharge the inner loop counter, recharge to 30
+    set x, 30  [1]          ; recharge the inner loop counter, recharge to 30, (we already did the first sample right before jumping here)
 inner_loop:
-    in pins, 1  [2]         ; sample the data lines, once.
+    in pins, 1  [2]         ; sample the data lines, once. And wait, you need exactly 4 clock cycles between sample.
     jmp x-- inner_loop      ; go back to sample another bit
-    in pins, 1
+    in pins, 1              ; with this I can keep the 4 cycles per sample, accurate
     jmp y-- outer_loop      ; go back to sample the next 32 bit word
 
 
     wait 1 pin E            ; wait for the line to go up again before  start sampling again
 
 
-; % c-sdk {
-; static inline void clocked_input_program_init(PIO pio, uint sm, uint offset, uint pin) {
-;     pio_sm_config c = clocked_input_program_get_default_config(offset);
+% c-sdk {
+static inline void ts4231_capture_program_init(PIO pio, uint sm, uint offset, uint pin) {
+    pio_sm_config c = ts4231_capture_program_get_default_config(offset);
 
-;     // Set the IN base pin to the provided `pin` parameter. This is the data
-;     // pin, and the next-numbered GPIO is used as the clock pin.
-;     sm_config_set_in_pins(&c, pin);
-;     // Set the pin directions to input at the PIO
-;     pio_sm_set_consecutive_pindirs(pio, sm, pin, 2, false);
-;     // Connect these GPIOs to this PIO block
-;     pio_gpio_init(pio, pin);
-;     pio_gpio_init(pio, pin + 1);
+    // Set the IN base pin to the provided `pin` parameter. This is the data
+    // pin, and the next-numbered GPIO is used as the clock pin.
+    sm_config_set_in_pins(&c, pin);
+    // Set the pin directions to input at the PIO
+    pio_sm_set_consecutive_pindirs(pio, sm, pin, 2, false);
+    // Connect these GPIOs to this PIO block
+    pio_gpio_init(pio, pin);
+    pio_gpio_init(pio, pin + 1);
 
-;     // Shifting to left matches the customary MSB-first ordering of SPI.
-;     sm_config_set_in_shift(
-;         &c,
-;         false, // Shift-to-right = false (i.e. shift to left)
-;         true,  // Autopush enabled
-;         8      // Autopush threshold = 8
-;     );
+    // Shifting to left matches the customary MSB-first ordering of SPI.
+    sm_config_set_in_shift(
+        &c,
+        false, // Shift-to-right = false (i.e. shift to left)
+        true,  // Autopush enabled
+        8      // Autopush threshold = 8
+    );
 
-;     // We only receive, so disable the TX FIFO to make the RX FIFO deeper.
-;     sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_RX);
+    // We only receive, so disable the TX FIFO to make the RX FIFO deeper.
+    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_RX);
 
-;     // Load our configuration, and start the program from the beginning
-;     pio_sm_init(pio, sm, offset, &c);
-;     pio_sm_set_enabled(pio, sm, true);
-; }
-; %}
+    // Load our configuration, and start the program from the beginning
+    pio_sm_init(pio, sm, offset, &c);
+    pio_sm_set_enabled(pio, sm, true);
+}
+%}
