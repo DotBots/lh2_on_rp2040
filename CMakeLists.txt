@@ -16,12 +16,13 @@ set(CMAKE_CXX_STANDARD 17)
 # Initialize the SDK
 pico_sdk_init()
 
-# Conver the PIO assembler
-pico_generate_pio_header(${PROJECT_NAME} ${CMAKE_CURRENT_LIST_DIR}/ts4231_capture.pio)
 
 add_executable(${PROJECT_NAME}
         main.c
         )
+        
+# Conver the PIO assembler
+pico_generate_pio_header(${PROJECT_NAME} ${CMAKE_CURRENT_LIST_DIR}/ts4231_capture.pio)
 
 # add_subdirectory(lh2)
 
