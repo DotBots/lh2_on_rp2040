@@ -5,6 +5,7 @@
  */
 
 #include "hardware/pio.h"
+#include "lh2/lh2.h"
 #include "pico/stdlib.h"
 #include "ts4231_capture.pio.h"
 #include <stdio.h>
@@ -12,6 +13,9 @@
 #define LH2_0_DATA_PIN 15 // The Envelope pin will be (Data pin + 1)
 
 int main() {
+
+  // LH2 config
+  db_lh2_init();
 
   // Configure the PIO
   PIO pio = pio0;
