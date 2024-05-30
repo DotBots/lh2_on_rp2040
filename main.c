@@ -5,23 +5,26 @@
  */
 
 #include "hardware/pio.h"
-#include "lh2/lh2.h"
+// #include "lh2/lh2.h"
 #include "pico/stdlib.h"
 #include "ts4231_capture.pio.h"
+#include "pico/cyw43_arch.h"
 #include <stdio.h>
 
-#define LH2_0_DATA_PIN 15 // The Envelope pin will be (Data pin + 1)
-
+#define LH2_0_DATA_PIN 15 // The Envelope pin will be (Data pin + 
 int main() {
 
   // LH2 config
-  db_lh2_init();
+  // db_lh2_init();
 
   // Configure the PIO
   PIO pio = pio0;
   uint offset = pio_add_program(pio, &ts4231_capture_program);
   uint sm = pio_claim_unused_sm(pio, true);
   ts4231_capture_program_init(pio, sm, offset, LH2_0_DATA_PIN);
+  // sleep_ms(250);
+  uint32_t test = pio->rxf[sm];
+  uint32_t test2 = pio->rxf[sm];
 
   stdio_init_all();
   if (cyw43_arch_init()) {
