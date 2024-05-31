@@ -15,11 +15,8 @@
  * @}
  */
 
-#include <nrf.h>
 #include <stdint.h>
 #include <stdbool.h>
-
-#include "gpio.h"
 
 //=========================== defines ==========================================
 
@@ -65,7 +62,7 @@ typedef struct {
  * @param[in]   gpio_d  pointer to gpio data
  * @param[in]   gpio_e  pointer to gpio event
  */
-void db_lh2_init(db_lh2_t *lh2, const gpio_t *gpio_d, const gpio_t *gpio_e);
+void db_lh2_init(db_lh2_t *lh2, const uint8_t gpio_d, const uint8_t gpio_e);
 
 /**
  * @brief Process raw data coming from the lighthouse, but skip the polynomial count calculation.
