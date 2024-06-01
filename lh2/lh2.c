@@ -1028,35 +1028,35 @@ void _initialize_ts4231(const uint8_t gpio_d, const uint8_t gpio_e) {
     gpio_put(gpio_e, 1);
     sleep_us(10);
     gpio_put(gpio_d, 1);
-    sleep_us(10); // TODO
+    sleep_us(10);
     gpio_set_dir(gpio_d, GPIO_IN);
     gpio_set_dir(gpio_e, GPIO_IN);
     // Finish by waiting 10usec
-    sleep_us(10); // TODO
+    sleep_us(10);
 
     // Now read back the sequence that the TS4231 answers.
     gpio_set_dir(gpio_d, GPIO_OUT);
     gpio_set_dir(gpio_e, GPIO_OUT);
-    sleep_us(10); // TODO
+    sleep_us(10);
     gpio_put(gpio_d, 0);
-    sleep_us(10); // TODO
+    sleep_us(10);
     gpio_put(gpio_e, 0);
-    sleep_us(10); // TODO
+    sleep_us(10);
     gpio_put(gpio_d, 1);
-    sleep_us(10); // TODO
+    sleep_us(10);
     gpio_put(gpio_e, 1);
-    sleep_us(10); // TODO
+    sleep_us(10);
     // Set Data pin as an input, to receive the data
     gpio_set_dir(gpio_d, GPIO_IN);
-    sleep_us(10); // TODO
+    sleep_us(10);
     gpio_put(gpio_e, 0);
-    sleep_us(10); // TODO
+    sleep_us(10);
     // Use the Envelope pin to output a clock while the data arrives.
     for (uint8_t i = 0; i < 14; i++) {
         gpio_put(gpio_e, 1);
-        sleep_us(10); // TODO
+        sleep_us(10);
         gpio_put(gpio_e, 0);
-        sleep_us(10); // TODO
+        sleep_us(10);
     }
 
     // Finish the configuration procedure
