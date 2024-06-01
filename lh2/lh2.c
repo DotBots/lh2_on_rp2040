@@ -15,12 +15,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
-#include <nrf.h>
 
-// #include "gpio.h" //TODO
 #include "hardware/gpio.h"
 #include "lh2.h"
-// #include "timer_hf.h" //TODO
 #include "pico/time.h"
 
 //=========================== defines =========================================
@@ -51,17 +48,6 @@
 #define LH2_SWEEP_PERIOD_THRESHOLD_US          1000                                                           ///< How close a LH2 pulse must arrive relative to LH2_SWEEP_PERIOD_US, to be considered the same type of sweep (first sweep or second second). (in microseconds)
 #define LH2_TIMER_DEV                          2                                                              ///< Timer device used for LH2
 
-#if defined(NRF5340_XXAA) && defined(NRF_APPLICATION)
-#define NRF_SPIM         NRF_SPIM4_S
-#define SPIM_IRQ         SPIM4_IRQn
-#define SPIM_IRQ_HANDLER SPIM4_IRQHandler
-#define NRF_GPIOTE       NRF_GPIOTE0_S
-#define NRF_PPI          NRF_DPPIC_S
-#else
-#define NRF_SPIM         NRF_SPIM3
-#define SPIM_IRQ         SPIM3_IRQn
-#define SPIM_IRQ_HANDLER SPIM3_IRQHandler
-#endif
 
 typedef struct {
     uint8_t  buffer[LH2_BUFFER_SIZE][SPI_BUFFER_SIZE];  ///< arrays of bits for local storage, contents of SPI transfer are copied into this
@@ -1603,16 +1589,16 @@ uint8_t _select_sweep(db_lh2_t *lh2, uint8_t polynomial, uint32_t timestamp) {
 
 //=========================== interrupts =======================================
 
-void SPIM_IRQ_HANDLER(void) {
-    // Check if the interrupt was caused by a fully send package
-    if (NRF_SPIM->EVENTS_END) {
-        // Clear the Interrupt flag
-        NRF_SPIM->EVENTS_END = 0;
-        // Reenable the PPI channel
-        db_lh2_start();
-        // Read the current time.
-        uint32_t timestamp = db_timer_hf_now(LH2_TIMER_DEV);
-        // Add new reading to the ring buffer
-        _add_to_spi_ring_buffer(&_lh2_vars.data, _lh2_vars.spi_rx_buffer, timestamp);
-    }
-}
+// void SPIM_IRQ_HANDLER(void) {
+//     // Check if the interrupt was caused by a fully send package
+//     if (NRF_SPIM->EVENTS_END) {
+//         // Clear the Interrupt flag
+//         NRF_SPIM->EVENTS_END = 0;
+//         // Reenable the PPI channel
+//         db_lh2_start();
+//         // Read the current time.
+//         uint32_t timestamp = db_timer_hf_now(LH2_TIMER_DEV);
+//         // Add new reading to the ring buffer
+//         _add_to_spi_ring_buffer(&_lh2_vars.data, _lh2_vars.spi_rx_buffer, timestamp);
+//     }
+// }
