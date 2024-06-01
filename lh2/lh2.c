@@ -635,12 +635,6 @@ static uint32_t _lfsr_checkpoint_bits[LH2_POLYNOMIAL_COUNT][LH2_SWEEP_COUNT]  = 
 static uint32_t _lfsr_checkpoint_count[LH2_POLYNOMIAL_COUNT][LH2_SWEEP_COUNT] = { 0 };
 static uint32_t _lsfr_checkpoint_average                                      = 0;
 
-///! NOTE: SPIM needs an SCK pin to be defined, P1.6 is used because it's not an available pin in the BCM module
-static const gpio_t _lh2_spi_fake_sck_gpio = {
-    .port = 1,
-    .pin  = 3,
-};
-
 ///< Encodes in two bits which sweep slot of a particular basestation is empty, (1 means data, 0 means empty)
 typedef enum {
     LH2_SWEEP_BOTH_SLOTS_EMPTY,   ///< Both sweep slots are empty
@@ -710,37 +704,6 @@ uint64_t _hamming_weight(uint64_t bits_in);
 uint32_t _reverse_count_p(uint8_t index, uint32_t bits);
 
 /**
- * @brief Set a gpio as an INPUT with no pull-up or pull-down
- * @param[in] gpio: pin to configure as input [0-31]
- */
-void _lh2_pin_set_input(const gpio_t *gpio);
-
-/**
- * @brief Set a gpio as an OUTPUT with standard drive
- * @param[in] gpio: gpio to configure as input [0-31]
- */
-void _lh2_pin_set_output(const gpio_t *gpio);
-
-/**
- * @brief set-up GPIOTE so that events are configured for falling (GPIOTE_CH_IN) and rising edges (GPIOTE_CH_IN_ENV_HiToLo) of the envelope signal
- *
- * @param[in]   gpio_e  pointer to gpio event
- */
-void _gpiote_setup(const gpio_t *gpio_e);
-
-/**
- * @brief start SPI3 at falling edge of envelope, start timer2 at falling edge of envelope, stop/capture timer2 at rising edge of envelope
- */
-void _ppi_setup(void);
-
-/**
- * @brief spi3 setup
- *
- * @param[in]   gpio_d  pointer to gpio data
- */
-void _spi_setup(const gpio_t *gpio_d);
-
-/**
  * @brief add one element to the ring buffer for spi captures
  *
  * @param[in]   cb          pointer to ring buffer structure
@@ -793,7 +756,6 @@ void db_lh2_init(db_lh2_t *lh2, const uint8_t gpio_d, const uint8_t gpio_e) {
 
     // Configure the necessary Pins in the GPIO peripheral  (MOSI and CS not needed)
     _lh2_pin_set_input(gpio_d);                    // Data_pin will become the MISO pin
-    _lh2_pin_set_output(&_lh2_spi_fake_sck_gpio);  // set SCK as Output.
 
     _spi_setup(gpio_d);
 
@@ -1548,99 +1510,6 @@ uint32_t _reverse_count_p(uint8_t index, uint32_t bits) {
         count_up++;
     }
     return count_up;
-}
-
-void _lh2_pin_set_input(const gpio_t *gpio) {
-    // Configure Data pin as INPUT, with no pullup or pull down.
-    nrf_port[gpio->port]->PIN_CNF[gpio->pin] = (GPIO_PIN_CNF_DIR_Input << GPIO_PIN_CNF_DIR_Pos) |
-                                               (GPIO_PIN_CNF_INPUT_Connect << GPIO_PIN_CNF_INPUT_Pos) |
-                                               (GPIO_PIN_CNF_PULL_Disabled << GPIO_PIN_CNF_PULL_Pos);
-}
-
-void _lh2_pin_set_output(const gpio_t *gpio) {
-    // Configure Data pin as OUTPUT, with standar power drive current.
-    nrf_port[gpio->port]->PIN_CNF[gpio->pin] = (GPIO_PIN_CNF_DIR_Output << GPIO_PIN_CNF_DIR_Pos) |   // Set Pin as output
-                                               (GPIO_PIN_CNF_DRIVE_S0S1 << GPIO_PIN_CNF_DRIVE_Pos);  // Activate high current gpio mode.
-}
-
-void _gpiote_setup(const gpio_t *gpio_e) {
-    NRF_GPIOTE->CONFIG[GPIOTE_CH_IN_ENV_HiToLo] = (GPIOTE_CONFIG_MODE_Event << GPIOTE_CONFIG_MODE_Pos) |
-                                                  (gpio_e->pin << GPIOTE_CONFIG_PSEL_Pos) |
-                                                  (gpio_e->port << GPIOTE_CONFIG_PORT_Pos) |
-                                                  (GPIOTE_CONFIG_POLARITY_HiToLo << GPIOTE_CONFIG_POLARITY_Pos);
-
-    NRF_GPIOTE->CONFIG[GPIOTE_CH_IN_ENV_LoToHi] = (GPIOTE_CONFIG_MODE_Event << GPIOTE_CONFIG_MODE_Pos) |
-                                                  (gpio_e->pin << GPIOTE_CONFIG_PSEL_Pos) |
-                                                  (gpio_e->port << GPIOTE_CONFIG_PORT_Pos) |
-                                                  (GPIOTE_CONFIG_POLARITY_LoToHi << GPIOTE_CONFIG_POLARITY_Pos);
-}
-
-void _ppi_setup(void) {
-#if defined(NRF5340_XXAA) && defined(NRF_APPLICATION)
-
-    // Add the selected DPPI Channel to a Group to be able to disable it with a Task.
-    NRF_PPI->CHG[PPI_SPI_GROUP] = (1 << PPI_SPI_START_CHAN);
-
-    // Publish an Event when the Envelope line goes from HIGH to LOW.
-    NRF_GPIOTE->PUBLISH_IN[GPIOTE_CH_IN_ENV_HiToLo] = (GPIOTE_PUBLISH_IN_EN_Enabled << GPIOTE_PUBLISH_IN_EN_Pos) |
-                                                      (PPI_SPI_START_CHAN << GPIOTE_PUBLISH_IN_CHIDX_Pos);
-
-    // Subscription to trigger the SPI transfer and disable the PPI system
-    NRF_SPIM->SUBSCRIBE_START = (SPIM_SUBSCRIBE_START_EN_Enabled << SPIM_SUBSCRIBE_START_EN_Pos) |
-                                (PPI_SPI_START_CHAN << SPIM_SUBSCRIBE_START_CHIDX_Pos);
-
-    NRF_PPI->SUBSCRIBE_CHG[PPI_SPI_GROUP].DIS = (DPPIC_SUBSCRIBE_CHG_DIS_EN_Enabled << DPPIC_SUBSCRIBE_CHG_DIS_EN_Pos) |
-                                                (PPI_SPI_START_CHAN << DPPIC_SUBSCRIBE_CHG_DIS_CHIDX_Pos);
-
-#else
-
-    // Add all the ppi setup to group 0 to be able to enable and disable it automatically.
-    NRF_PPI->CHG[PPI_SPI_GROUP] = (1 << PPI_SPI_START_CHAN);
-
-    uint32_t envelope_input_HiToLo        = (uint32_t)&NRF_GPIOTE->EVENTS_IN[GPIOTE_CH_IN_ENV_HiToLo];
-    uint32_t spi_start_task_addr          = (uint32_t)&NRF_SPIM->TASKS_START;
-    uint32_t ppi_group0_disable_task_addr = (uint32_t)&NRF_PPI->TASKS_CHG[0].DIS;
-
-    NRF_PPI->CH[PPI_SPI_START_CHAN].EEP   = envelope_input_HiToLo;         // envelope down
-    NRF_PPI->CH[PPI_SPI_START_CHAN].TEP   = spi_start_task_addr;           // start spi3 transfer
-    NRF_PPI->FORK[PPI_SPI_START_CHAN].TEP = ppi_group0_disable_task_addr;  // Disable the PPI group
-
-#endif
-}
-
-void _spi_setup(const gpio_t *gpio_d) {
-    // Define the necessary Pins in the SPIM peripheral
-    NRF_SPIM->PSEL.MISO = gpio_d->pin << SPIM_PSEL_MISO_PIN_Pos |                          // Define pin number for MISO pin
-                          gpio_d->port << SPIM_PSEL_MISO_PORT_Pos |                        // Define pin port for MISO pin
-                          SPIM_PSEL_MISO_CONNECT_Connected << SPIM_PSEL_MISO_CONNECT_Pos;  // Enable the MISO pin
-
-    NRF_SPIM->PSEL.SCK = _lh2_spi_fake_sck_gpio.pin << SPIM_PSEL_SCK_PIN_Pos |          // Define pin number for SCK pin
-                         _lh2_spi_fake_sck_gpio.port << SPIM_PSEL_SCK_PORT_Pos |        // Define pin port for SCK pin
-                         SPIM_PSEL_SCK_CONNECT_Connected << SPIM_PSEL_SCK_CONNECT_Pos;  // Enable the SCK pin
-
-    NRF_SPIM->PSEL.MOSI = (4UL) << SPIM_PSEL_MOSI_PIN_Pos |
-                          1 << SPIM_PSEL_MOSI_PORT_Pos |
-                          SPIM_PSEL_MOSI_CONNECT_Connected << SPIM_PSEL_MOSI_CONNECT_Pos;
-
-    // Configure the Interruptions
-    NVIC_ClearPendingIRQ(SPIM_IRQ);
-    NVIC_DisableIRQ(SPIM_IRQ);  // Disable interruptions while configuring
-
-    // Configure the SPIM peripheral
-    NRF_SPIM->FREQUENCY = SPIM_FREQUENCY_FREQUENCY_M32;                         // Set SPI frequency to 32MHz
-    NRF_SPIM->CONFIG    = SPIM_CONFIG_ORDER_MsbFirst << SPIM_CONFIG_ORDER_Pos;  // Set MsB out first
-
-    // Configure the EasyDMA channel, only using RX
-    NRF_SPIM->RXD.MAXCNT = SPI_BUFFER_SIZE;                    // Set the size of the input buffer.
-    NRF_SPIM->RXD.PTR    = (uint32_t)_lh2_vars.spi_rx_buffer;  // Set the input buffer pointer.
-
-    NRF_SPIM->INTENSET = SPIM_INTENSET_END_Enabled << SPIM_INTENSET_END_Pos;  // Enable interruption for when a packet arrives
-    NVIC_SetPriority(SPIM_IRQ, SPIM_INTERRUPT_PRIORITY);                      // Set priority for Radio interrupts to 1
-    // Enable SPIM interruptions
-    NVIC_EnableIRQ(SPIM_IRQ);
-
-    // Enable the SPIM peripheral
-    NRF_SPIM->ENABLE = SPIM_ENABLE_ENABLE_Enabled << SPIM_ENABLE_ENABLE_Pos;
 }
 
 void _add_to_spi_ring_buffer(lh2_ring_buffer_t *cb, uint8_t *data, uint32_t timestamp) {
