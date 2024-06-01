@@ -90,11 +90,4 @@ void db_lh2_start(void);
  */
 void db_lh2_stop(void);
 
-/**
- * @brief Reset the lh2 internal state so new location computation can be made
- *
- * @param[in]   lh2 pointer to the lh2 instance
- */
-void db_lh2_reset(db_lh2_t *lh2);
-
 #endif /* __LH2_H_ */

@@ -754,11 +754,6 @@ void db_lh2_init(db_lh2_t *lh2, const uint8_t gpio_d, const uint8_t gpio_e) {
     // Initialize the TS4231 on power-up - this is only necessary when power-cycling
     _initialize_ts4231(gpio_d, gpio_e);
 
-    // Configure the necessary Pins in the GPIO peripheral  (MOSI and CS not needed)
-    _lh2_pin_set_input(gpio_d);                    // Data_pin will become the MISO pin
-
-    _spi_setup(gpio_d);
-
     // Setup the LH2 local variables
     memset(_lh2_vars.spi_rx_buffer, 0, SPI_BUFFER_SIZE);
     // initialize the spi ring buffer
@@ -783,11 +778,11 @@ void db_lh2_init(db_lh2_t *lh2, const uint8_t gpio_d, const uint8_t gpio_e) {
     // Initialize the hash table for the lsfr checkpoints
     _fill_hash_table(_end_buffers_hashtable);
 
-    // initialize GPIOTEs
-    _gpiote_setup(gpio_e);
+    // Set-up interrups for the capture
+    // _gpiote_setup(gpio_e);
 
-    // initialize PPI
-    _ppi_setup();
+    // initialize automatic capture with the PIO
+    // _ppi_setup();
 }
 
 void db_lh2_start(void) {
@@ -798,60 +793,6 @@ void db_lh2_start(void) {
 void db_lh2_stop(void) {
 
     NRF_PPI->TASKS_CHG[PPI_SPI_GROUP].DIS = 1;
-}
-
-void db_lh2_reset(db_lh2_t *lh2) {
-    // compute LFSR locations and detect invalid packets
-    for (uint8_t basestation = 0; basestation < LH2_BASESTATION_COUNT; basestation++) {
-        for (uint8_t sweep = 0; sweep < 2; sweep++) {
-
-            // Remove the flags indicating available data
-            lh2->data_ready[sweep][basestation] = DB_LH2_NO_NEW_DATA;
-            lh2->timestamps[sweep][basestation] = 0;
-            // We won't actually clear the data, it's not worth the computational effort.
-        }
-    }
-}
-
-void db_lh2_process_raw_data(db_lh2_t *lh2) {
-    if (_lh2_vars.data.count == 0) {
-        return;
-    }
-
-    // Get value before it's overwritten by the ringbuffer.
-    uint8_t temp_spi_bits[SPI_BUFFER_SIZE * 2] = { 0 };  // The temp buffer has to be 128 long because _demodulate_light() expects it to be so
-                                                         // Making it smaller causes a hardfault
-                                                         // I don't know why, the SPI buffer is clearly 64bytes long.
-                                                         // should ask fil about this
-
-    // stop the interruptions while you're reading the data.
-    uint32_t temp_timestamp = 0;  // default timestamp
-    if (!_get_from_spi_ring_buffer(&_lh2_vars.data, temp_spi_bits, &temp_timestamp)) {
-        return;
-    }
-    // perform the demodulation + poly search on the received packets
-    // convert the SPI reading to bits via zero-crossing counter demodulation and differential/biphasic manchester decoding
-    uint64_t temp_bits_sweep = _demodulate_light(temp_spi_bits);
-
-    // figure out which polynomial each one of the two samples come from.
-    int8_t  temp_bit_offset          = 0;  // default offset
-    uint8_t temp_selected_polynomial = _determine_polynomial(temp_bits_sweep, &temp_bit_offset);
-
-    // If there was an error with the polynomial, leave without updating anything
-    if (temp_selected_polynomial == LH2_POLYNOMIAL_ERROR_INDICATOR) {
-        return;
-    }
-
-    // Figure in which of the two sweep slots we should save the new data.
-    uint8_t sweep = _select_sweep(lh2, temp_selected_polynomial, temp_timestamp);
-
-    // Put the newly read polynomials in the data structure (polynomial 0,1 must map to LH0, 2,3 to LH1. This can be accomplish by  integer-dividing the selected poly in 2, a shift >> accomplishes this.)
-    // This structur always holds the two most recent sweeps from any lighthouse
-    lh2->raw_data[sweep][temp_selected_polynomial >> 1].bit_offset          = temp_bit_offset;
-    lh2->raw_data[sweep][temp_selected_polynomial >> 1].selected_polynomial = temp_selected_polynomial;
-    lh2->raw_data[sweep][temp_selected_polynomial >> 1].bits_sweep          = temp_bits_sweep;
-    lh2->timestamps[sweep][temp_selected_polynomial >> 1]                   = temp_timestamp;
-    lh2->data_ready[sweep][temp_selected_polynomial >> 1]                   = DB_LH2_RAW_DATA_AVAILABLE;
 }
 
 void db_lh2_process_location(db_lh2_t *lh2) {
