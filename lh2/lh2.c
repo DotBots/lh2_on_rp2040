@@ -20,7 +20,8 @@
 // #include "gpio.h" //TODO
 #include "hardware/gpio.h"
 #include "lh2.h"
-#include "timer_hf.h"
+// #include "timer_hf.h" //TODO
+#include "pico/time.h"
 
 //=========================== defines =========================================
 
@@ -659,7 +660,7 @@ static lh2_vars_t _lh2_vars;  ///< local data of the LH2 driver
  * @param[in]   gpio_d  pointer to gpio data
  * @param[in]   gpio_e  pointer to gpio event
  */
-void _initialize_ts4231(const gpio_t *gpio_d, const gpio_t *gpio_e);
+void _initialize_ts4231(const uint8_t gpio_d, const uint8_t gpio_e);
 
 /**
  * @brief
@@ -968,160 +969,115 @@ void db_lh2_process_location(db_lh2_t *lh2) {
 
 void _initialize_ts4231(const uint8_t gpio_d, const uint8_t gpio_e) {
 
-    // Configure the wait timer
-    db_timer_hf_init(LH2_TIMER_DEV);
-
     // Filip's code define these pins as inputs, and then changes them quickly to outputs. Not sure why, but it works.
-    // _lh2_pin_set_input(gpio_d); TODO
-    // _lh2_pin_set_input(gpio_e); TODO
     gpio_init(gpio_d);
     gpio_init(gpio_e);
     gpio_set_dir(gpio_d, GPIO_IN);
     gpio_set_dir(gpio_e, GPIO_IN);
 
-
     // start the TS4231 initialization
     // Wiggle the Envelope and Data pins
-    // _lh2_pin_set_output(gpio_e); TODO
     gpio_set_dir(gpio_e, GPIO_OUT);
-    db_timer_hf_delay_us(LH2_TIMER_DEV, 10);
-    // nrf_port[gpio_e->port]->OUTSET = 1 << gpio_e->pin;  // set pin HIGH; TODO
+    sleep_us(10);
     gpio_put(gpio_e, 1);
-    db_timer_hf_delay_us(LH2_TIMER_DEV, 10);
-    // nrf_port[gpio_e->port]->OUTCLR = 1 << gpio_e->pin;  // set pin LOW; TODO
+    sleep_us(10);
     gpio_put(gpio_e, 0);
-    db_timer_hf_delay_us(LH2_TIMER_DEV, 10);
-    // nrf_port[gpio_e->port]->OUTSET = 1 << gpio_e->pin; TODO
+    sleep_us(10);
     gpio_put(gpio_e, 1);
-    db_timer_hf_delay_us(LH2_TIMER_DEV, 10);
-    // _lh2_pin_set_output(gpio_d); TODO
+    sleep_us(10);
     gpio_set_dir(gpio_d, GPIO_OUT);
-    db_timer_hf_delay_us(LH2_TIMER_DEV, 10);
-    // nrf_port[gpio_d->port]->OUTSET = 1 << gpio_d->pin; // TODO
+    sleep_us(10);
     gpio_put(gpio_d, 1);
-    db_timer_hf_delay_us(LH2_TIMER_DEV, 10);
+    sleep_us(10);
     // Turn the pins back to inputs
-    // _lh2_pin_set_input(gpio_d); // TODO
-    // _lh2_pin_set_input(gpio_e); // TODO
     gpio_set_dir(gpio_d, GPIO_IN);
     gpio_set_dir(gpio_e, GPIO_IN);
     // finally, wait 1 milisecond
-    db_timer_hf_delay_us(LH2_TIMER_DEV, 1000);
+    sleep_us(1000);
 
     // Send the configuration magic number/sequence
     uint16_t config_val = 0x392B;
     // Turn the Data and Envelope lines back to outputs and clear them.
-    // _lh2_pin_set_output(gpio_e); // TODO
-    // _lh2_pin_set_output(gpio_d); // TODO
     gpio_set_dir(gpio_d, GPIO_OUT);
     gpio_set_dir(gpio_e, GPIO_OUT);
-    db_timer_hf_delay_us(LH2_TIMER_DEV, 10);
-    // nrf_port[gpio_d->port]->OUTCLR = 1 << gpio_d->pin; // TODO
+    sleep_us(10);
     gpio_put(gpio_d, 0);
-    db_timer_hf_delay_us(LH2_TIMER_DEV, 10);
-    // nrf_port[gpio_e->port]->OUTCLR = 1 << gpio_e->pin; // TODO
+    sleep_us(10);
     gpio_put(gpio_e, 0);
-    db_timer_hf_delay_us(LH2_TIMER_DEV, 10);
+    sleep_us(10);
     // Send the magic configuration value, MSB first.
     for (uint8_t i = 0; i < 15; i++) {
 
         config_val = config_val << 1;
         if ((config_val & 0x8000) > 0) {
-            // nrf_port[gpio_d->port]->OUTSET = 1 << gpio_d->pin; // TODO
             gpio_put(gpio_d, 1);
         } else {
-            // nrf_port[gpio_d->port]->OUTCLR = 1 << gpio_d->pin; // TODO
             gpio_put(gpio_d, 0);
         }
 
         // Toggle the Envelope line as a clock.
-        db_timer_hf_delay_us(LH2_TIMER_DEV, 10);
-        // nrf_port[gpio_e->port]->OUTSET = 1 << gpio_e->pin; // TODO
+        sleep_us(10);
         gpio_put(gpio_e, 1);
-        db_timer_hf_delay_us(LH2_TIMER_DEV, 10);
-        // nrf_port[gpio_e->port]->OUTCLR = 1 << gpio_e->pin; // TODO
+        sleep_us(10);
         gpio_put(gpio_e, 0);
-        db_timer_hf_delay_us(LH2_TIMER_DEV, 10);
+        sleep_us(10);
     }
     // Finish send sequence and turn pins into inputs again.
-    // nrf_port[gpio_d->port]->OUTCLR = 1 << gpio_d->pin; // TODO
     gpio_put(gpio_d, 0);
-    db_timer_hf_delay_us(LH2_TIMER_DEV, 10);
-    // nrf_port[gpio_e->port]->OUTSET = 1 << gpio_e->pin; // TODO
+    sleep_us(10);
     gpio_put(gpio_e, 1);
-    db_timer_hf_delay_us(LH2_TIMER_DEV, 10);
-    // nrf_port[gpio_d->port]->OUTSET = 1 << gpio_d->pin; // TODO
+    sleep_us(10);
     gpio_put(gpio_d, 1);
-    db_timer_hf_delay_us(LH2_TIMER_DEV, 10);
-    // _lh2_pin_set_input(gpio_d); // TODO
-    // _lh2_pin_set_input(gpio_e); // TODO
+    sleep_us(10); // TODO
     gpio_set_dir(gpio_d, GPIO_IN);
     gpio_set_dir(gpio_e, GPIO_IN);
     // Finish by waiting 10usec
-    db_timer_hf_delay_us(LH2_TIMER_DEV, 10);
+    sleep_us(10); // TODO
 
     // Now read back the sequence that the TS4231 answers.
-    // _lh2_pin_set_output(gpio_e); // TODO
-    // _lh2_pin_set_output(gpio_d); // TODO
     gpio_set_dir(gpio_d, GPIO_OUT);
     gpio_set_dir(gpio_e, GPIO_OUT);
-    db_timer_hf_delay_us(LH2_TIMER_DEV, 10);
-    // nrf_port[gpio_d->port]->OUTCLR = 1 << gpio_d->pin; // TODO
+    sleep_us(10); // TODO
     gpio_put(gpio_d, 0);
-    db_timer_hf_delay_us(LH2_TIMER_DEV, 10);
-    // nrf_port[gpio_e->port]->OUTCLR = 1 << gpio_e->pin; // TODO
+    sleep_us(10); // TODO
     gpio_put(gpio_e, 0);
-    db_timer_hf_delay_us(LH2_TIMER_DEV, 10);
-    // nrf_port[gpio_d->port]->OUTSET = 1 << gpio_d->pin; // TODO
+    sleep_us(10); // TODO
     gpio_put(gpio_d, 1);
-    db_timer_hf_delay_us(LH2_TIMER_DEV, 10);
-    // nrf_port[gpio_e->port]->OUTSET = 1 << gpio_e->pin; // TODO
+    sleep_us(10); // TODO
     gpio_put(gpio_e, 1);
-    db_timer_hf_delay_us(LH2_TIMER_DEV, 10);
+    sleep_us(10); // TODO
     // Set Data pin as an input, to receive the data
-    // _lh2_pin_set_input(gpio_d); // TODO
     gpio_set_dir(gpio_d, GPIO_IN);
-    db_timer_hf_delay_us(LH2_TIMER_DEV, 10);
-    // nrf_port[gpio_e->port]->OUTCLR = 1 << gpio_e->pin; // TODO
+    sleep_us(10); // TODO
     gpio_put(gpio_e, 0);
-    db_timer_hf_delay_us(LH2_TIMER_DEV, 10);
+    sleep_us(10); // TODO
     // Use the Envelope pin to output a clock while the data arrives.
     for (uint8_t i = 0; i < 14; i++) {
-        // nrf_port[gpio_e->port]->OUTSET = 1 << gpio_e->pin; // TODO
         gpio_put(gpio_e, 1);
-        db_timer_hf_delay_us(LH2_TIMER_DEV, 10);
-        // nrf_port[gpio_e->port]->OUTCLR = 1 << gpio_e->pin; // TODO
+        sleep_us(10); // TODO
         gpio_put(gpio_e, 0);
-        db_timer_hf_delay_us(LH2_TIMER_DEV, 10);
+        sleep_us(10); // TODO
     }
 
     // Finish the configuration procedure
-    // _lh2_pin_set_output(gpio_d);
     gpio_set_dir(gpio_d, GPIO_OUT);
-    db_timer_hf_delay_us(LH2_TIMER_DEV, 10);
-    // nrf_port[gpio_e->port]->OUTSET = 1 << gpio_e->pin; // TODO
+    sleep_us(10);
     gpio_put(gpio_e, 1);
-    db_timer_hf_delay_us(LH2_TIMER_DEV, 10);
-    // nrf_port[gpio_d->port]->OUTSET = 1 << gpio_d->pin; // TODO
+    sleep_us(10);
     gpio_put(gpio_d, 1);
-    db_timer_hf_delay_us(LH2_TIMER_DEV, 10);
+    sleep_us(10);
 
-    // nrf_port[gpio_e->port]->OUTCLR = 1 << gpio_e->pin; // TODO
     gpio_put(gpio_e, 0);
-    db_timer_hf_delay_us(LH2_TIMER_DEV, 10);
-    // nrf_port[gpio_d->port]->OUTCLR = 1 << gpio_d->pin; // TODO
+    sleep_us(10);
     gpio_put(gpio_d, 0);
-    db_timer_hf_delay_us(LH2_TIMER_DEV, 10);
-    // nrf_port[gpio_e->port]->OUTSET = 1 << gpio_e->pin; // TODO
+    sleep_us(10);
     gpio_put(gpio_e, 1);
-    db_timer_hf_delay_us(LH2_TIMER_DEV, 10);
+    sleep_us(10);
 
-    // _lh2_pin_set_input(gpio_d); // TODO
-    // _lh2_pin_set_input(gpio_e); // TODO
     gpio_set_dir(gpio_d, GPIO_IN);
     gpio_set_dir(gpio_e, GPIO_IN);
 
-    db_timer_hf_delay_us(LH2_TIMER_DEV, 50000);
+    sleep_us(50000);
 }
 
 uint64_t _demodulate_light(uint8_t *sample_buffer) {  // bad input variable name!!
