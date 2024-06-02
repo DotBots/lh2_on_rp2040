@@ -48,13 +48,12 @@
 #define LH2_SWEEP_PERIOD_THRESHOLD_US          1000                                                           ///< How close a LH2 pulse must arrive relative to LH2_SWEEP_PERIOD_US, to be considered the same type of sweep (first sweep or second second). (in microseconds)
 #define LH2_TIMER_DEV                          2                                                              ///< Timer device used for LH2
 
-
 typedef struct {
-    uint8_t  buffer[LH2_BUFFER_SIZE][SPI_BUFFER_SIZE];  ///< arrays of bits for local storage, contents of SPI transfer are copied into this
-    uint32_t timestamps[LH2_BUFFER_SIZE];               ///< arrays of timestamps of when different SPI transfers happened
-    uint8_t  writeIndex;                                // Index for next write
-    uint8_t  readIndex;                                 // Index for next read
-    uint8_t  count;                                     // Number of arrays in buffer
+    uint8_t         buffer[LH2_BUFFER_SIZE][SPI_BUFFER_SIZE];  ///< arrays of bits for local storage, contents of SPI transfer are copied into this
+    absolute_time_t timestamps[LH2_BUFFER_SIZE];               ///< arrays of timestamps of when different SPI transfers happened
+    uint8_t         writeIndex;                                // Index for next write
+    uint8_t         readIndex;                                 // Index for next read
+    uint8_t         count;                                     // Number of arrays in buffer
 } lh2_ring_buffer_t;
 
 typedef struct {
@@ -696,7 +695,7 @@ uint32_t _reverse_count_p(uint8_t index, uint32_t bits);
  * @param[in]   data        pointer to the data array to save in the ring buffer
  * @param[in]   timestamp   timestamp of when the LH2 measurement was taken. (taken with timer_hf_now())
  */
-void _add_to_spi_ring_buffer(lh2_ring_buffer_t *cb, uint8_t *data, uint32_t timestamp);
+void _add_to_spi_ring_buffer(lh2_ring_buffer_t *cb, uint8_t *data, absolute_time_t timestamp);
 
 /**
  * @brief retreive the oldest element from the ring buffer for spi captures
@@ -705,7 +704,7 @@ void _add_to_spi_ring_buffer(lh2_ring_buffer_t *cb, uint8_t *data, uint32_t time
  * @param[out]   data        pointer to the array where the ring buffer data will be saved
  * @param[out]   timestamp   timestamp of when the LH2 measurement was taken. (taken with timer_hf_now())
  */
-bool _get_from_spi_ring_buffer(lh2_ring_buffer_t *cb, uint8_t *data, uint32_t *timestamp);
+bool _get_from_spi_ring_buffer(lh2_ring_buffer_t *cb, uint8_t *data, absolute_time_t *timestamp);
 
 /**
  * @brief generates a hashtable from the LSFR checpoints and stores it in an array.
@@ -732,7 +731,7 @@ void _update_lfsr_checkpoints(uint8_t polynomial, uint32_t bits, uint32_t count)
  * @param[in] polynomial: index of found polynomia
  * @param[in] timestamp: timestamp of the SPI capture
  */
-uint8_t _select_sweep(db_lh2_t *lh2, uint8_t polynomial, uint32_t timestamp);
+uint8_t _select_sweep(db_lh2_t *lh2, uint8_t polynomial, absolute_time_t timestamp);
 
 //=========================== public ===========================================
 
@@ -755,7 +754,7 @@ void db_lh2_init(db_lh2_t *lh2, const uint8_t gpio_d, const uint8_t gpio_e) {
             lh2->raw_data[sweep][basestation].bit_offset           = 0;
             lh2->locations[sweep][basestation].selected_polynomial = LH2_POLYNOMIAL_ERROR_INDICATOR;
             lh2->locations[sweep][basestation].lfsr_location       = LH2_LOCATION_ERROR_INDICATOR;
-            lh2->timestamps[sweep][basestation]                    = 0;
+            lh2->timestamps[sweep][basestation]                    = nil_time;
             lh2->data_ready[sweep][basestation]                    = DB_LH2_NO_NEW_DATA;
         }
     }
@@ -773,12 +772,12 @@ void db_lh2_init(db_lh2_t *lh2, const uint8_t gpio_d, const uint8_t gpio_e) {
 
 void db_lh2_start(void) {
 
-    NRF_PPI->TASKS_CHG[PPI_SPI_GROUP].EN = 1;
+    // NRF_PPI->TASKS_CHG[PPI_SPI_GROUP].EN = 1;
 }
 
 void db_lh2_stop(void) {
 
-    NRF_PPI->TASKS_CHG[PPI_SPI_GROUP].DIS = 1;
+    // NRF_PPI->TASKS_CHG[PPI_SPI_GROUP].DIS = 1;
 }
 
 void db_lh2_process_location(db_lh2_t *lh2) {
@@ -797,7 +796,7 @@ void db_lh2_process_location(db_lh2_t *lh2) {
                                                          // should ask fil about this
 
     // stop the interruptions while you're reading the data.
-    uint32_t temp_timestamp = 0;  // default timestamp
+    absolute_time_t temp_timestamp = nil_time;  // default timestamp
     if (!_get_from_spi_ring_buffer(&_lh2_vars.data, temp_spi_bits, &temp_timestamp)) {
         return;
     }
@@ -1439,7 +1438,7 @@ uint32_t _reverse_count_p(uint8_t index, uint32_t bits) {
     return count_up;
 }
 
-void _add_to_spi_ring_buffer(lh2_ring_buffer_t *cb, uint8_t *data, uint32_t timestamp) {
+void _add_to_spi_ring_buffer(lh2_ring_buffer_t *cb, uint8_t *data, absolute_time_t timestamp) {
 
     memcpy(cb->buffer[cb->writeIndex], data, SPI_BUFFER_SIZE);
     cb->timestamps[cb->writeIndex] = timestamp;
@@ -1453,7 +1452,7 @@ void _add_to_spi_ring_buffer(lh2_ring_buffer_t *cb, uint8_t *data, uint32_t time
     }
 }
 
-bool _get_from_spi_ring_buffer(lh2_ring_buffer_t *cb, uint8_t *data, uint32_t *timestamp) {
+bool _get_from_spi_ring_buffer(lh2_ring_buffer_t *cb, uint8_t *data, absolute_time_t *timestamp) {
     if (cb->count == 0) {
         // Buffer is empty
         return false;
@@ -1495,26 +1494,26 @@ void _update_lfsr_checkpoints(uint8_t polynomial, uint32_t bits, uint32_t count)
     _lfsr_checkpoint_count[polynomial][index] = count;
 }
 
-uint8_t _select_sweep(db_lh2_t *lh2, uint8_t polynomial, uint32_t timestamp) {
+uint8_t _select_sweep(db_lh2_t *lh2, uint8_t polynomial, absolute_time_t timestamp) {
     // TODO: check the exact, per-mode period of each polynomial instead of using a blanket 20ms
 
-    uint8_t  basestation = polynomial >> 1;  ///< each base station uses 2 polynomials. integer dividing by 2 maps the polynomial number to the basestation number.
-    uint32_t now         = db_timer_hf_now(LH2_TIMER_DEV);
+    uint8_t         basestation = polynomial >> 1;  ///< each base station uses 2 polynomials. integer dividing by 2 maps the polynomial number to the basestation number.
+    absolute_time_t now         = get_absolute_time();
     // check that current data stored is not too old.
     for (size_t sweep = 0; sweep < 2; sweep++) {
-        if (now - lh2->timestamps[0][basestation] > LH2_MAX_DATA_VALID_TIME_US) {
+        if (absolute_time_diff_us(lh2->timestamps[0][basestation], now) > LH2_MAX_DATA_VALID_TIME_US) {
             // Remove data that is too old.
             lh2->raw_data[sweep][basestation].bits_sweep          = 0;
             lh2->raw_data[sweep][basestation].selected_polynomial = LH2_POLYNOMIAL_ERROR_INDICATOR;
             lh2->raw_data[sweep][basestation].bit_offset          = 0;
-            lh2->timestamps[sweep][basestation]                   = 0;
+            lh2->timestamps[sweep][basestation]                   = nil_time;
             lh2->data_ready[sweep][basestation]                   = DB_LH2_NO_NEW_DATA;
             // I don't think it's worth it to remove the location data. It is already marked as "No new data"
         }
     }
 
     ///< Encode in two bits which sweep slot of this basestation is empty, (1 means data, 0 means empty)
-    uint8_t sweep_slot_state = ((lh2->timestamps[1][basestation] != 0) << 1) | (lh2->timestamps[0][basestation] != 0);
+    uint8_t sweep_slot_state = (!is_nil_time(lh2->timestamps[1][basestation]) << 1) | (!is_nil_time(lh2->timestamps[0][basestation]));
     // by default, select the first slot
     uint8_t selected_sweep = 0;
 
@@ -1530,7 +1529,7 @@ uint8_t _select_sweep(db_lh2_t *lh2, uint8_t polynomial, uint32_t timestamp) {
         case LH2_SWEEP_FIRST_SLOT_EMPTY:
         {
             // check that the filled slot is not a perfect 20ms match to the new data.
-            uint32_t diff = (timestamp - lh2->timestamps[1][basestation]) % LH2_SWEEP_PERIOD_US;
+            int64_t diff = (absolute_time_diff_us(lh2->timestamps[1][basestation], timestamp) % LH2_SWEEP_PERIOD_US);
             diff          = diff < LH2_SWEEP_PERIOD_US - diff ? diff : LH2_SWEEP_PERIOD_US - diff;
 
             if (diff < LH2_SWEEP_PERIOD_THRESHOLD_US) {
@@ -1546,7 +1545,7 @@ uint8_t _select_sweep(db_lh2_t *lh2, uint8_t polynomial, uint32_t timestamp) {
         case LH2_SWEEP_SECOND_SLOT_EMPTY:
         {
             // check that the filled slot is not a perfect 20ms match to the new data.
-            uint32_t diff = (timestamp - lh2->timestamps[0][basestation]) % LH2_SWEEP_PERIOD_US;
+            int64_t diff = (absolute_time_diff_us(lh2->timestamps[0][basestation], timestamp) % LH2_SWEEP_PERIOD_US);
             diff          = diff < LH2_SWEEP_PERIOD_US - diff ? diff : LH2_SWEEP_PERIOD_US - diff;
 
             if (diff < LH2_SWEEP_PERIOD_THRESHOLD_US) {
@@ -1562,9 +1561,9 @@ uint8_t _select_sweep(db_lh2_t *lh2, uint8_t polynomial, uint32_t timestamp) {
         case LH2_SWEEP_BOTH_SLOTS_FULL:
         {
             // How far away is this new pulse from the already stored data
-            uint32_t diff_0 = (timestamp - lh2->timestamps[0][basestation]) % LH2_SWEEP_PERIOD_US;
+            int64_t diff_0 = (absolute_time_diff_us(lh2->timestamps[0][basestation], timestamp) % LH2_SWEEP_PERIOD_US);
             diff_0          = diff_0 < LH2_SWEEP_PERIOD_US - diff_0 ? diff_0 : LH2_SWEEP_PERIOD_US - diff_0;
-            uint32_t diff_1 = (timestamp - lh2->timestamps[1][basestation]) % LH2_SWEEP_PERIOD_US;
+            int64_t diff_1 = (absolute_time_diff_us(lh2->timestamps[1][basestation], timestamp) % LH2_SWEEP_PERIOD_US);
             diff_1          = diff_1 < LH2_SWEEP_PERIOD_US - diff_1 ? diff_1 : LH2_SWEEP_PERIOD_US - diff_1;
 
             // Use the one that is closest to 20ms
@@ -1597,7 +1596,7 @@ uint8_t _select_sweep(db_lh2_t *lh2, uint8_t polynomial, uint32_t timestamp) {
 //         // Reenable the PPI channel
 //         db_lh2_start();
 //         // Read the current time.
-//         uint32_t timestamp = db_timer_hf_now(LH2_TIMER_DEV);
+//         uint64_t timestamp = db_timer_hf_now(LH2_TIMER_DEV);
 //         // Add new reading to the ring buffer
 //         _add_to_spi_ring_buffer(&_lh2_vars.data, _lh2_vars.spi_rx_buffer, timestamp);
 //     }

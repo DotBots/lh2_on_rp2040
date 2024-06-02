@@ -7,7 +7,7 @@ set(PICO_BOARD pico_w)
 include($ENV{PICO_SDK_PATH}/external/pico_sdk_import.cmake)
 
 # Project name
-project(blink C CXX ASM)
+project(lh2 C CXX ASM)
 
 # C and C++ standard
 set(CMAKE_C_STANDARD 11)
@@ -16,15 +16,16 @@ set(CMAKE_CXX_STANDARD 17)
 # Initialize the SDK
 pico_sdk_init()
 
-
 add_executable(${PROJECT_NAME}
-        main.c
+        src/main.c
+        src/lh2/lh2.c
         )
+
+# Add lh2 files
+include_directories(${CMAKE_SOURCE_DIR}/src/lh2)
         
 # Conver the PIO assembler
-pico_generate_pio_header(${PROJECT_NAME} ${CMAKE_CURRENT_LIST_DIR}/ts4231_capture.pio)
-
-# add_subdirectory(lh2)
+pico_generate_pio_header(${PROJECT_NAME} ${CMAKE_CURRENT_LIST_DIR}/src/ts4231_capture.pio)
 
 # pull in common dependencies
 target_link_libraries(${PROJECT_NAME} 
