@@ -1,0 +1,27 @@
+---
+BasedOnStyle:                         LLVM
+---
+Language:                             Cpp
+#AlignArrayOfStructures:               Left
+AlignConsecutiveMacros:               true
+AlignConsecutiveAssignments:          true
+AlignConsecutiveDeclarations:         true
+AlignEscapedNewlines:                 true
+#AlignOperands:                        true
+AlignTrailingComments:                true
+AllowShortBlocksOnASingleLine:        Empty
+AllowShortFunctionsOnASingleLine:     None
+AllowShortIfStatementsOnASingleLine:  Never
+AllowShortLoopsOnASingleLine:         false
+BreakBeforeBraces: Custom
+BraceWrapping:
+    AfterCaseLabel:                   true
+ColumnLimit:                          0
+Cpp11BracedListStyle:                 false
+IncludeBlocks:                        Preserve
+IndentCaseLabels:                     true
+IndentWidth:                          4
+SortIncludes:                         false
+SpacesBeforeTrailingComments:         2
+UseTab:                               Never
+...
