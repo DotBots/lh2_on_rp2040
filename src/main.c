@@ -13,14 +13,14 @@
 #include "hardware/pio.h"
 #include "lh2/lh2.h"
 #include "pico/stdlib.h"
-#include "ts4231_capture.pio.h"
 #include "pico/cyw43_arch.h"
 #include <stdio.h>
+#include <stdlib.h>
 
 //=========================== defines ==========================================
 
-#define LH2_0_DATA_PIN 3 // The Envelope pin will be (Data pin + 1)
-#define LH2_0_ENV_PIN (LH2_0_DATA_PIN+1) // The Envelope pin will be (Data pin + 1)
+#define LH2_0_DATA_PIN 3                     // The Envelope pin will be (Data pin + 1)
+#define LH2_0_ENV_PIN  (LH2_0_DATA_PIN + 1)  // The Envelope pin will be (Data pin + 1)
 
 //=========================== variables ========================================
 
@@ -32,29 +32,29 @@ static db_lh2_t _lh2;
 
 int main() {
 
-  // LH2 config
-  db_lh2_init(&_lh2, LH2_0_DATA_PIN, LH2_0_ENV_PIN);
-  // Configure the PIO
-  PIO pio = pio0;
-  uint offset = pio_add_program(pio, &ts4231_capture_program);
-  uint sm = pio_claim_unused_sm(pio, true);
-  ts4231_capture_program_init(pio, sm, offset, LH2_0_DATA_PIN);
-  // sleep_ms(250);
-  uint32_t test = pio->rxf[sm];
-  uint32_t test2 = pio->rxf[sm];
+    // TODO - configure the clock for 128MHz
 
-  stdio_init_all();
-  if (cyw43_arch_init()) {
-    printf("Wi-Fi init failed");
-    return -1;
-  }
-  while (true) {
+    // LH2 config
+    db_lh2_init(&_lh2, LH2_0_DATA_PIN, LH2_0_ENV_PIN);
+
+    // test gpio
+    gpio_init(10);
+    gpio_set_dir(10, GPIO_OUT);
+    gpio_put(10, 1);
+
+    cyw43_arch_init();
     cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, 1);
-    sleep_ms(250);
-    cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, 0);
-    sleep_ms(750);
-  }
+
+    while (1) {
+        // wait until something happens e.g. an SPI interrupt
+        // __WFE();
+
+        // the location function has to be running all the time
+        db_lh2_process_location(&_lh2);
+    }
+
+    // one last instruction, doesn't do anything, it's just to have a place to put a breakpoint.
+    // __NOP();
 }
 
 //=========================== functions =============================================
-
