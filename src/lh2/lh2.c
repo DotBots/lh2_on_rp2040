@@ -16,25 +16,21 @@
 #include <string.h>
 #include <stdbool.h>
 
+#include "ts4231_capture.pio.h"
 #include "hardware/gpio.h"
 #include "lh2.h"
 #include "pico/time.h"
+#include "hardware/dma.h"
+#include "hardware/pio.h"
 
 //=========================== defines =========================================
 
-#define SPIM_INTERRUPT_PRIORITY                2                                                              ///< Interrupt priority, as high as it will go
-#define SPI_BUFFER_SIZE                        64                                                             ///< Size of buffers used for SPI communications
-#define SPI_FAKE_SCK_PIN                       6                                                              ///< NOTE: SPIM needs an SCK pin to be defined, P1.6 is used because it's not an available pin in the BCM module.
-#define SPI_FAKE_SCK_PORT                      1                                                              ///< NOTE: SPIM needs an SCK pin to be defined, P1.6 is used because it's not an available pin in the BCM module.
+#define TS4231_CAPTURE_BUFFER_SIZE             64                                                             ///< Size of buffers used for SPI communications
 #define FUZZY_CHIP                             0xFF                                                           ///< not sure what this is about
 #define LH2_LOCATION_ERROR_INDICATOR           0xFFFFFFFF                                                     ///< indicate the location value is false
 #define LH2_POLYNOMIAL_ERROR_INDICATOR         0xFF                                                           ///< indicate the polynomial index is invalid
 #define POLYNOMIAL_BIT_ERROR_INITIAL_THRESHOLD 4                                                              ///< initial threshold of polynomial error
 #define LH2_BUFFER_SIZE                        10                                                             ///< Amount of lh2 frames the buffer can contain
-#define GPIOTE_CH_IN_ENV_HiToLo                1                                                              ///< falling edge gpio channel
-#define GPIOTE_CH_IN_ENV_LoToHi                2                                                              ///< rising edge gpio channel
-#define PPI_SPI_START_CHAN                     2                                                              ///< PPI channel for starting the GPIOTE to SPI capture ppi
-#define PPI_SPI_GROUP                          0                                                              ///< PPI group for automatically dissabling the ppi after a successful spi capture
 #define HASH_TABLE_BITS                        11                                                             ///< How many bits will be used for the hashtable for the _end_buffers
 #define HASH_TABLE_SIZE                        (1 << HASH_TABLE_BITS)                                         ///< How big will the hashtable for the _end_buffers
 #define HASH_TABLE_MASK                        ((1 << HASH_TABLE_BITS) - 1)                                   ///< Mask selecting the HAS_TABLE_BITS least significant bits
@@ -49,16 +45,17 @@
 #define LH2_TIMER_DEV                          2                                                              ///< Timer device used for LH2
 
 typedef struct {
-    uint8_t         buffer[LH2_BUFFER_SIZE][SPI_BUFFER_SIZE];  ///< arrays of bits for local storage, contents of SPI transfer are copied into this
-    absolute_time_t timestamps[LH2_BUFFER_SIZE];               ///< arrays of timestamps of when different SPI transfers happened
-    uint8_t         writeIndex;                                // Index for next write
-    uint8_t         readIndex;                                 // Index for next read
-    uint8_t         count;                                     // Number of arrays in buffer
+    uint8_t         buffer[LH2_BUFFER_SIZE][TS4231_CAPTURE_BUFFER_SIZE];  ///< arrays of bits for local storage, contents of SPI transfer are copied into this
+    absolute_time_t timestamps[LH2_BUFFER_SIZE];                          ///< arrays of timestamps of when different SPI transfers happened
+    uint8_t         writeIndex;                                           // Index for next write
+    uint8_t         readIndex;                                            // Index for next read
+    uint8_t         count;                                                // Number of arrays in buffer
 } lh2_ring_buffer_t;
 
 typedef struct {
-    uint8_t           spi_rx_buffer[SPI_BUFFER_SIZE];  ///< buffer where data coming from SPI are stored
-    lh2_ring_buffer_t data;                            ///< array containing demodulation data of each locations
+    uint8_t           spi_rx_buffer[TS4231_CAPTURE_BUFFER_SIZE];  ///< buffer where data coming from SPI are stored
+    lh2_ring_buffer_t data;                                       ///< array containing demodulation data of each locations
+
 } lh2_vars_t;
 
 //=========================== variables ========================================
@@ -642,6 +639,11 @@ static lh2_vars_t _lh2_vars;  ///< local data of the LH2 driver
 void _initialize_ts4231(const uint8_t gpio_d, const uint8_t gpio_e);
 
 /**
+ * @brief Configure the DMA to automatically retrieve data from the PIO TS4231 capture. And send it to the ring buffer
+ */
+void _init_dma_pio_capture(PIO pio, uint sm);
+
+/**
  * @brief
  * @param[in] sample_buffer: SPI samples loaded into a local buffer
  * @return chipsH: 64-bits of demodulated data
@@ -695,7 +697,7 @@ uint32_t _reverse_count_p(uint8_t index, uint32_t bits);
  * @param[in]   data        pointer to the data array to save in the ring buffer
  * @param[in]   timestamp   timestamp of when the LH2 measurement was taken. (taken with timer_hf_now())
  */
-void _add_to_spi_ring_buffer(lh2_ring_buffer_t *cb, uint8_t *data, absolute_time_t timestamp);
+void _add_to_ts4231_ring_buffer(lh2_ring_buffer_t *cb, uint8_t *data, absolute_time_t timestamp);
 
 /**
  * @brief retreive the oldest element from the ring buffer for spi captures
@@ -704,7 +706,7 @@ void _add_to_spi_ring_buffer(lh2_ring_buffer_t *cb, uint8_t *data, absolute_time
  * @param[out]   data        pointer to the array where the ring buffer data will be saved
  * @param[out]   timestamp   timestamp of when the LH2 measurement was taken. (taken with timer_hf_now())
  */
-bool _get_from_spi_ring_buffer(lh2_ring_buffer_t *cb, uint8_t *data, absolute_time_t *timestamp);
+bool _get_from_ts4231_ring_buffer(lh2_ring_buffer_t *cb, uint8_t *data, absolute_time_t *timestamp);
 
 /**
  * @brief generates a hashtable from the LSFR checpoints and stores it in an array.
@@ -733,6 +735,11 @@ void _update_lfsr_checkpoints(uint8_t polynomial, uint32_t bits, uint32_t count)
  */
 uint8_t _select_sweep(db_lh2_t *lh2, uint8_t polynomial, absolute_time_t timestamp);
 
+/**
+ * @brief ISR that copies the data generated by the PIO capture of the TS4231 into a ring buffer
+ */
+void pio_irq_handler(void);
+
 //=========================== public ===========================================
 
 void db_lh2_init(db_lh2_t *lh2, const uint8_t gpio_d, const uint8_t gpio_e) {
@@ -740,7 +747,7 @@ void db_lh2_init(db_lh2_t *lh2, const uint8_t gpio_d, const uint8_t gpio_e) {
     _initialize_ts4231(gpio_d, gpio_e);
 
     // Setup the LH2 local variables
-    memset(_lh2_vars.spi_rx_buffer, 0, SPI_BUFFER_SIZE);
+    memset(_lh2_vars.spi_rx_buffer, 0, TS4231_CAPTURE_BUFFER_SIZE);
     // initialize the spi ring buffer
     memset(&_lh2_vars.data, 0, sizeof(lh2_ring_buffer_t));
 
@@ -763,11 +770,29 @@ void db_lh2_init(db_lh2_t *lh2, const uint8_t gpio_d, const uint8_t gpio_e) {
     // Initialize the hash table for the lsfr checkpoints
     _fill_hash_table(_end_buffers_hashtable);
 
-    // Set-up interrups for the capture
-    // _gpiote_setup(gpio_e);
+    // Configure the PIO and the DMA for the TS4231 capture
+    PIO  pio    = pio0;
+    uint offset = pio_add_program(pio, &ts4231_capture_program);
+    uint sm     = pio_claim_unused_sm(pio, true);
 
-    // initialize automatic capture with the PIO
-    // _ppi_setup();
+    // Find a free irq
+    int8_t pio_irq = (pio == pio0) ? PIO0_IRQ_0 : PIO1_IRQ_0;
+    pio_irq        = (pio == pio0) ? PIO0_IRQ_0 : PIO1_IRQ_0;
+    if (irq_get_exclusive_handler(pio_irq)) {
+        pio_irq++;
+        if (irq_get_exclusive_handler(pio_irq)) {
+            panic("All IRQs are in use");
+        }
+    }
+    // Enable interrupt
+    irq_add_shared_handler(pio_irq, pio_irq_handler, PICO_SHARED_IRQ_HANDLER_DEFAULT_ORDER_PRIORITY);  // Add a shared IRQ handler
+    irq_set_enabled(pio_irq, true);                                                                    // Enable the IRQ
+    const uint irq_index = pio_irq - ((pio == pio0) ? PIO0_IRQ_0 : PIO1_IRQ_0);                        // Get index of the IRQ
+    pio_set_irqn_source_enabled(pio, irq_index, pis_interrupt0 + sm, true);                            // Set pio to tell us when the FIFO is NOT empty
+
+    // Enable PIO and DMA
+    _init_dma_pio_capture(pio, sm);
+    ts4231_capture_program_init(pio, sm, offset, gpio_d);
 }
 
 void db_lh2_start(void) {
@@ -790,14 +815,14 @@ void db_lh2_process_location(db_lh2_t *lh2) {
     //*********************************************************************************//
 
     // Get value before it's overwritten by the ringbuffer.
-    uint8_t temp_spi_bits[SPI_BUFFER_SIZE * 2] = { 0 };  // The temp buffer has to be 128 long because _demodulate_light() expects it to be so
-                                                         // Making it smaller causes a hardfault
-                                                         // I don't know why, the SPI buffer is clearly 64bytes long.
-                                                         // should ask fil about this
+    uint8_t temp_spi_bits[TS4231_CAPTURE_BUFFER_SIZE * 2] = { 0 };  // The temp buffer has to be 128 long because _demodulate_light() expects it to be so
+                                                                    // Making it smaller causes a hardfault
+                                                                    // I don't know why, the SPI buffer is clearly 64bytes long.
+                                                                    // should ask fil about this
 
     // stop the interruptions while you're reading the data.
     absolute_time_t temp_timestamp = nil_time;  // default timestamp
-    if (!_get_from_spi_ring_buffer(&_lh2_vars.data, temp_spi_bits, &temp_timestamp)) {
+    if (!_get_from_ts4231_ring_buffer(&_lh2_vars.data, temp_spi_bits, &temp_timestamp)) {
         return;
     }
     // perform the demodulation + poly search on the received packets
@@ -966,6 +991,28 @@ void _initialize_ts4231(const uint8_t gpio_d, const uint8_t gpio_e) {
     gpio_set_dir(gpio_e, GPIO_IN);
 
     sleep_us(50000);
+}
+
+void _init_dma_pio_capture(PIO pio, uint sm) {
+
+    // Configure PIO->Temp Buffer DMA
+    int chan = dma_claim_unused_channel(true);
+
+    dma_channel_config c = dma_channel_get_default_config(chan);
+    channel_config_set_transfer_data_size(&c, DMA_SIZE_32);     // Transfer 32 bits at a time (max possible)
+    channel_config_set_read_increment(&c, false);               // reading from PIO FIFO, no need to increment
+    channel_config_set_write_increment(&c, true);               // writing to temp buffer, increment
+    channel_config_set_dreq(&c, pio_get_dreq(pio, sm, false));  // tie the DMA channel to the PIO capture
+    channel_config_set_ring(&c, true, 4);                       // 4 means reset address after (1 << 4) = 16 words transfers, or 64 bytes (TS4231_CAPTURE_BUFFER_SIZE)
+
+    dma_channel_configure(
+        chan,                     // Channel to be configured
+        &c,                       // The configuration we just created
+        _lh2_vars.spi_rx_buffer,  // The initial write address (temp buffer for the PIO capture)
+        &pio->rxf[sm],            // The initial read address (PIO RX FIFO)
+        1,                        // Transfer 1 word per data request.
+        true                      // Start immediately.
+    );
 }
 
 uint64_t _demodulate_light(uint8_t *sample_buffer) {  // bad input variable name!!
@@ -1438,9 +1485,9 @@ uint32_t _reverse_count_p(uint8_t index, uint32_t bits) {
     return count_up;
 }
 
-void _add_to_spi_ring_buffer(lh2_ring_buffer_t *cb, uint8_t *data, absolute_time_t timestamp) {
+void _add_to_ts4231_ring_buffer(lh2_ring_buffer_t *cb, uint8_t *data, absolute_time_t timestamp) {
 
-    memcpy(cb->buffer[cb->writeIndex], data, SPI_BUFFER_SIZE);
+    memcpy(cb->buffer[cb->writeIndex], data, TS4231_CAPTURE_BUFFER_SIZE);
     cb->timestamps[cb->writeIndex] = timestamp;
     cb->writeIndex                 = (cb->writeIndex + 1) % LH2_BUFFER_SIZE;
 
@@ -1452,13 +1499,13 @@ void _add_to_spi_ring_buffer(lh2_ring_buffer_t *cb, uint8_t *data, absolute_time
     }
 }
 
-bool _get_from_spi_ring_buffer(lh2_ring_buffer_t *cb, uint8_t *data, absolute_time_t *timestamp) {
+bool _get_from_ts4231_ring_buffer(lh2_ring_buffer_t *cb, uint8_t *data, absolute_time_t *timestamp) {
     if (cb->count == 0) {
         // Buffer is empty
         return false;
     }
 
-    memcpy(data, cb->buffer[cb->readIndex], SPI_BUFFER_SIZE);
+    memcpy(data, cb->buffer[cb->readIndex], TS4231_CAPTURE_BUFFER_SIZE);
     *timestamp    = cb->timestamps[cb->readIndex];
     cb->readIndex = (cb->readIndex + 1) % LH2_BUFFER_SIZE;
     cb->count--;
@@ -1530,7 +1577,7 @@ uint8_t _select_sweep(db_lh2_t *lh2, uint8_t polynomial, absolute_time_t timesta
         {
             // check that the filled slot is not a perfect 20ms match to the new data.
             int64_t diff = (absolute_time_diff_us(lh2->timestamps[1][basestation], timestamp) % LH2_SWEEP_PERIOD_US);
-            diff          = diff < LH2_SWEEP_PERIOD_US - diff ? diff : LH2_SWEEP_PERIOD_US - diff;
+            diff         = diff < LH2_SWEEP_PERIOD_US - diff ? diff : LH2_SWEEP_PERIOD_US - diff;
 
             if (diff < LH2_SWEEP_PERIOD_THRESHOLD_US) {
                 // match: use filled slot
@@ -1546,7 +1593,7 @@ uint8_t _select_sweep(db_lh2_t *lh2, uint8_t polynomial, absolute_time_t timesta
         {
             // check that the filled slot is not a perfect 20ms match to the new data.
             int64_t diff = (absolute_time_diff_us(lh2->timestamps[0][basestation], timestamp) % LH2_SWEEP_PERIOD_US);
-            diff          = diff < LH2_SWEEP_PERIOD_US - diff ? diff : LH2_SWEEP_PERIOD_US - diff;
+            diff         = diff < LH2_SWEEP_PERIOD_US - diff ? diff : LH2_SWEEP_PERIOD_US - diff;
 
             if (diff < LH2_SWEEP_PERIOD_THRESHOLD_US) {
                 // match: use filled slot
@@ -1562,9 +1609,9 @@ uint8_t _select_sweep(db_lh2_t *lh2, uint8_t polynomial, absolute_time_t timesta
         {
             // How far away is this new pulse from the already stored data
             int64_t diff_0 = (absolute_time_diff_us(lh2->timestamps[0][basestation], timestamp) % LH2_SWEEP_PERIOD_US);
-            diff_0          = diff_0 < LH2_SWEEP_PERIOD_US - diff_0 ? diff_0 : LH2_SWEEP_PERIOD_US - diff_0;
+            diff_0         = diff_0 < LH2_SWEEP_PERIOD_US - diff_0 ? diff_0 : LH2_SWEEP_PERIOD_US - diff_0;
             int64_t diff_1 = (absolute_time_diff_us(lh2->timestamps[1][basestation], timestamp) % LH2_SWEEP_PERIOD_US);
-            diff_1          = diff_1 < LH2_SWEEP_PERIOD_US - diff_1 ? diff_1 : LH2_SWEEP_PERIOD_US - diff_1;
+            diff_1         = diff_1 < LH2_SWEEP_PERIOD_US - diff_1 ? diff_1 : LH2_SWEEP_PERIOD_US - diff_1;
 
             // Use the one that is closest to 20ms
             if (diff_0 <= diff_1) {
@@ -1588,16 +1635,13 @@ uint8_t _select_sweep(db_lh2_t *lh2, uint8_t polynomial, absolute_time_t timesta
 
 //=========================== interrupts =======================================
 
-// void SPIM_IRQ_HANDLER(void) {
-//     // Check if the interrupt was caused by a fully send package
-//     if (NRF_SPIM->EVENTS_END) {
-//         // Clear the Interrupt flag
-//         NRF_SPIM->EVENTS_END = 0;
-//         // Reenable the PPI channel
-//         db_lh2_start();
-//         // Read the current time.
-//         uint64_t timestamp = db_timer_hf_now(LH2_TIMER_DEV);
-//         // Add new reading to the ring buffer
-//         _add_to_spi_ring_buffer(&_lh2_vars.data, _lh2_vars.spi_rx_buffer, timestamp);
-//     }
-// }
+void pio_irq_handler(void) {
+
+    gpio_put(10, 1);
+    // Read the current time.
+    absolute_time_t timestamp = get_absolute_time();
+    // Add new reading to the ring buffer
+    _add_to_ts4231_ring_buffer(&_lh2_vars.data, _lh2_vars.spi_rx_buffer, timestamp);
+    gpio_put(10, 0);
+}
+// pio_interrupt_clear(pio, sm);
