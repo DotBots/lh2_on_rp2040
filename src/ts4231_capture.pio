@@ -31,8 +31,9 @@ inner_loop:
     in pins, 1  [2]         ; sample the data lines, once. And wait, you need exactly 4 clock cycles between sample.
     jmp x-- inner_loop      ; go back to sample another bit
     in pins, 1              ; with this I can keep the 4 cycles per sample, accurate
-    jmp y-- outer_loop      ; go back to sample the next 32 bit word
+    jmp y-- outer_loop      ; go back to sample the next 32 bit word+
 
+    irq set 4 rel           ; let the system know that a full capture just finished.
 
     wait 1 pin E            ; wait for the line to go up again before  start sampling again
 
@@ -55,7 +56,7 @@ static inline void ts4231_capture_program_init(PIO pio, uint sm, uint offset, ui
         &c,
         false, // Shift-to-right = false (i.e. shift to left)
         true,  // Autopush enabled
-        8      // Autopush threshold = 8
+        32     // Autopush threshold = 32
     );
 
     // We only receive, so disable the TX FIFO to make the RX FIFO deeper.
