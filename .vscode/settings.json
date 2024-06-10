@@ -21,6 +21,9 @@
     "cmake.configureSettings": {
         "PICO_SDK_PATH": "${env:PICO_SDK_PATH}"
       },
-      "cmake.generator": "Unix Makefiles",
+    "cmake.generator": "Unix Makefiles",
+    "files.associations": {
+        "pio_instructions.h": "c"
+    },
     //   "cmake.buildDirectory": "${workspaceFolder}/build"
 }
