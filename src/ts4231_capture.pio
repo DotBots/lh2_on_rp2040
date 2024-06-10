@@ -33,7 +33,7 @@ inner_loop:
     in pins, 1              ; with this I can keep the 4 cycles per sample, accurate
     jmp y-- outer_loop      ; go back to sample the next 32 bit word+
 
-    irq set 4 rel           ; let the system know that a full capture just finished.
+    irq wait 0              ; let the system know that a full capture just finished.
 
     wait 1 pin E            ; wait for the line to go up again before  start sampling again
 
