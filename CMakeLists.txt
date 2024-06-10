@@ -42,3 +42,7 @@ add_compile_options(-Wall
         -Wno-unused-function # we have some for the docs that aren't called
         -Wno-maybe-uninitialized
         )
+
+# enable USB CDC serial
+pico_enable_stdio_usb(lh2 1)
+pico_enable_stdio_uart(lh2 0)
