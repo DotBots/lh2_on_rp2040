@@ -2,7 +2,7 @@
  * @file
  * @ingroup bsp_lh2
  *
- * @brief  nRF52833-specific definition of the "lh2" bsp module.
+ * @brief  RP2040-specific definition of the "lh2" bsp module.
  *
  * @author Filip Maksimovic <filip.maksimovic@inria.fr>
  * @author Said Alvarado-Marin <said-alexander.alvarado-marin@inria.fr>
@@ -55,7 +55,7 @@ typedef struct {
 typedef struct {
     uint8_t           spi_rx_buffer[TS4231_CAPTURE_BUFFER_SIZE];  ///< buffer where data coming from SPI are stored
     lh2_ring_buffer_t data;                                       ///< array containing demodulation data of each locations
-    int dma_channel; ///< dma channel that sends the data from the PIO capture to the ring_buffer. 
+    int               dma_channel;                                ///< dma channel that sends the data from the PIO capture to the ring_buffer.
 } lh2_vars_t;
 
 //=========================== variables ========================================
@@ -777,16 +777,16 @@ void db_lh2_init(db_lh2_t *lh2, const uint8_t gpio_d, const uint8_t gpio_e) {
 
     // Find a free irq
     int8_t pio_irq = PIO0_IRQ_0;
-    pio_set_irq0_source_enabled(pio, pis_interrupt0, true);                            // Set pio to tell us when the FIFO is NOT empty
+    pio_set_irq0_source_enabled(pio, pis_interrupt0, true);  // Set pio to tell us when the FIFO is NOT empty
 
     // Enable interrupt
     irq_set_exclusive_handler(pio_irq, pio_irq_handler);
     // irq_add_shared_handler(pio_irq, pio_irq_handler, PICO_SHARED_IRQ_HANDLER_DEFAULT_ORDER_PRIORITY);  // Add a shared IRQ handler
-    irq_set_enabled(pio_irq, true);                                                                    // Enable the IRQ
+    irq_set_enabled(pio_irq, true);  // Enable the IRQ
 
     // Enable PIO and DMA
     _init_dma_pio_capture(pio, sm);
-    ts4231_capture_program_init(pio, sm, offset, gpio_d);
+    ts4231_capture_program_init(pio, sm, offset, gpio_d, 5);
 }
 
 void db_lh2_start(void) {
@@ -993,7 +993,7 @@ void _init_dma_pio_capture(PIO pio, uint sm) {
     int chan = dma_claim_unused_channel(true);
 
     dma_channel_config c = dma_channel_get_default_config(chan);
-    channel_config_set_transfer_data_size(&c, DMA_SIZE_32);     // Transfer 32 bits at a time (max possible)
+    channel_config_set_transfer_data_size(&c, DMA_SIZE_8);     // Transfer 32 bits at a time (max possible)
     channel_config_set_read_increment(&c, false);               // reading from PIO FIFO, no need to increment
     channel_config_set_write_increment(&c, true);               // writing to temp buffer, increment
     channel_config_set_dreq(&c, pio_get_dreq(pio, sm, false));  // tie the DMA channel to the PIO capture
@@ -1004,7 +1004,7 @@ void _init_dma_pio_capture(PIO pio, uint sm) {
         &c,                       // The configuration we just created
         _lh2_vars.spi_rx_buffer,  // The initial write address (temp buffer for the PIO capture)
         &pio->rxf[sm],            // The initial read address (PIO RX FIFO)
-        16,                        // Transfer 1 word per data request.
+        64,                       // Transfer 1 word per data request.
         true                      // Start immediately.
     );
 }
@@ -1637,13 +1637,15 @@ void pio_irq_handler(void) {
     absolute_time_t timestamp = get_absolute_time();
     // Add new reading to the ring buffer
     _add_to_ts4231_ring_buffer(&_lh2_vars.data, _lh2_vars.spi_rx_buffer, timestamp);
-    gpio_put(10, 0);
-    pio_sm_clear_fifos(pio0,0);     // Purge the PIO FIFO from any straggling bits
+    pio_sm_clear_fifos(pio0, 0);  // Purge the PIO FIFO from any straggling bits
     // reset the DMA channel
-    dma_channel_set_trans_count(_lh2_vars.dma_channel, 16, false);
+    dma_channel_set_trans_count(_lh2_vars.dma_channel, 64, false);
     dma_channel_set_write_addr(_lh2_vars.dma_channel, _lh2_vars.spi_rx_buffer, true);
     // Clear the PIO interrupt
     pio_interrupt_clear(pio0, 0);
-    // printf("Aft: PIO0->IRQ = %08b, FIFO RX = %d, RingBuff = %d, DMA_tx_count = %d\n", pio0_hw->irq,pio_sm_get_rx_fifo_level(pio0,0), _lh2_vars.data.count, dma_hw->ch[_lh2_vars.dma_channel].transfer_count);
+    gpio_put(10, 0);
+    // for (size_t i = 0; i < 6; i++) {
+    //     printf("buffer[%d-%d] = %08b %08b\n", 2 * i, 2 * i + 1, _lh2_vars.spi_rx_buffer[2 * i], _lh2_vars.spi_rx_buffer[2 * i + 1]);
+    // }
 }
 // pio_interrupt_clear(pio, sm);
