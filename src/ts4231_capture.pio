@@ -45,8 +45,8 @@ sample_loop:
     in pins, 1          side 0x0    [2]         ; sample the data line, wait 1 clock cycle less to accomodate the JMP instruction
     jmp x-- sample_loop  side 0x2         ; go back to sample another bit
 
-    ; irq set 0 rel           ; let the system know that a full capture just finished.
-    irq wait 0          side 0x3 
+    ; let the system know that a full capture just finished.
+    irq wait 0 rel      side 0x3 
 
     wait 1 pin E        side 0x0           ; wait for the line to go up again before  start sampling again
 

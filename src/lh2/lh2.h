@@ -51,6 +51,7 @@ typedef struct {
     absolute_time_t           timestamps[LH2_SWEEP_COUNT][LH2_BASESTATION_COUNT];  ///< timestamp of when the raw data was received
     db_lh2_data_ready_state_t data_ready[LH2_SWEEP_COUNT][LH2_BASESTATION_COUNT];  ///< Is the data in the buffer ready to send over radio, or has it already been sent ?
     uint8_t                  *spi_ring_buffer_count_ptr;                           ///< pointer to the SPI rung buffer packet count, so the user application can read how many spi captures are waiting to be processed.
+    uint8_t                   sensor;                                              //< Which TS4231 sensor is associated with this data structure (valid values [0-3]).
 } db_lh2_t;
 
 //=========================== public ===========================================
@@ -58,18 +59,12 @@ typedef struct {
 /**
  * @brief Initialize LH2
  *
- * @param[in]   lh2 pointer to the lh2 instance
+ * @param[in]   lh2     pointer to the lh2 instance
+ * @param[in]   sensor  which TS4231 sensor is associated with this data structure (valid values [0-3])
  * @param[in]   gpio_d  pointer to gpio data
  * @param[in]   gpio_e  pointer to gpio event
  */
-void db_lh2_init(db_lh2_t *lh2, const uint8_t gpio_d, const uint8_t gpio_e);
-
-/**
- * @brief Process raw data coming from the lighthouse, but skip the polynomial count calculation.
- *
- * @param[in]   lh2 pointer to the lh2 instance
- */
-void db_lh2_process_raw_data(db_lh2_t *lh2);
+void db_lh2_init(db_lh2_t *lh2, uint8_t sensor, const uint8_t gpio_d, const uint8_t gpio_e);
 
 /**
  * @brief Compute the location based on raw data coming from the lighthouse

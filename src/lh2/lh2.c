@@ -25,6 +25,7 @@
 
 //=========================== defines =========================================
 
+#define TS4231_SENSOR_QTY                      4                                                              ///< Max amount of TS4231 sensors the library supports
 #define TS4231_CAPTURE_BUFFER_SIZE             64                                                             ///< Size of buffers used for SPI communications
 #define FUZZY_CHIP                             0xFF                                                           ///< not sure what this is about
 #define LH2_LOCATION_ERROR_INDICATOR           0xFFFFFFFF                                                     ///< indicate the location value is false
@@ -44,19 +45,35 @@
 #define LH2_SWEEP_PERIOD_THRESHOLD_US          1000                                                           ///< How close a LH2 pulse must arrive relative to LH2_SWEEP_PERIOD_US, to be considered the same type of sweep (first sweep or second second). (in microseconds)
 #define LH2_TIMER_DEV                          2                                                              ///< Timer device used for LH2
 
+// Ring buffer for the ts4231 raw data capture
 typedef struct {
     uint8_t         buffer[LH2_BUFFER_SIZE][TS4231_CAPTURE_BUFFER_SIZE];  ///< arrays of bits for local storage, contents of SPI transfer are copied into this
     absolute_time_t timestamps[LH2_BUFFER_SIZE];                          ///< arrays of timestamps of when different SPI transfers happened
-    uint8_t         writeIndex;                                           // Index for next write
-    uint8_t         readIndex;                                            // Index for next read
-    uint8_t         count;                                                // Number of arrays in buffer
+    uint8_t         writeIndex;                                           ///< Index for next write
+    uint8_t         readIndex;                                            ///< Index for next read
+    uint8_t         count;                                                ///< Number of arrays in buffer
 } lh2_ring_buffer_t;
 
+// Dynamic checkpoints for the lsfr index search
 typedef struct {
-    uint8_t           spi_rx_buffer[TS4231_CAPTURE_BUFFER_SIZE];  ///< buffer where data coming from SPI are stored
-    lh2_ring_buffer_t data;                                       ///< array containing demodulation data of each locations
-    int               dma_channel;                                ///< dma channel that sends the data from the PIO capture to the ring_buffer.
+    uint32_t bits[LH2_POLYNOMIAL_COUNT][LH2_SWEEP_COUNT];   ///< lfsr pseudo-random bits of the checkpoints
+    uint32_t count[LH2_POLYNOMIAL_COUNT][LH2_SWEEP_COUNT];  ///< corresponding lfsr index of the checkpoints
+    uint32_t average;                                       ///< mid-point between the lfsr index of sweep0 and sweep1
+} _lfsr_checkpoint_t;
+
+typedef struct {
+    uint8_t            spi_rx_buffer[TS4231_CAPTURE_BUFFER_SIZE];  ///< buffer where data coming from SPI are stored
+    lh2_ring_buffer_t  data;                                       ///< array containing demodulation data of each locations
+    _lfsr_checkpoint_t checkpoint;                                 ///< Dynamic checkpoints for the lsfr index search
+    int                dma_channel;                                ///< dma channel that sends the data from the PIO capture to the ring_buffer.
+    PIO                pio;                                        ///< PIO device used for this sensor
+    uint8_t            sm;                                         ///< State machine used for this sensor
 } lh2_vars_t;
+
+typedef struct {
+    bool init_flag;  ///< is true if the program has already been stored in the pio memory
+    uint offset[2];  ///< offsets for the pio programs in pio0 and pio1
+} pio_vars_t;
 
 //=========================== variables ========================================
 
@@ -612,11 +629,6 @@ static const uint32_t _end_buffers[LH2_POLYNOMIAL_COUNT][NUM_LSFR_COUNT_CHECKPOI
 
 static uint16_t _end_buffers_hashtable[HASH_TABLE_SIZE] = { 0 };
 
-// Dynamic checkpoint
-static uint32_t _lfsr_checkpoint_bits[LH2_POLYNOMIAL_COUNT][LH2_SWEEP_COUNT]  = { 0 };  ///<
-static uint32_t _lfsr_checkpoint_count[LH2_POLYNOMIAL_COUNT][LH2_SWEEP_COUNT] = { 0 };
-static uint32_t _lsfr_checkpoint_average                                      = 0;
-
 ///< Encodes in two bits which sweep slot of a particular basestation is empty, (1 means data, 0 means empty)
 typedef enum {
     LH2_SWEEP_BOTH_SLOTS_EMPTY,   ///< Both sweep slots are empty
@@ -625,7 +637,9 @@ typedef enum {
     LH2_SWEEP_BOTH_SLOTS_FULL,    ///< Both sweep slots are filled with raw data
 } db_lh2_sweep_slot_state_t;
 
-static lh2_vars_t _lh2_vars;  ///< local data of the LH2 driver
+static lh2_vars_t _lh2_vars[TS4231_SENSOR_QTY];  ///< local data of the LH2 driver, one copy per sensor
+
+static pio_vars_t _pio_vars = { 0 };  ///< stores the status of the one-off configurations of the pio programs
 
 //=========================== prototypes =======================================
 
@@ -640,8 +654,10 @@ void _initialize_ts4231(const uint8_t gpio_d, const uint8_t gpio_e);
 
 /**
  * @brief Configure the DMA to automatically retrieve data from the PIO TS4231 capture. And send it to the ring buffer
+ *
+ * @param[in] sensor:   which TS4231 sensor is associated with this data structure (valid values [0-3])
  */
-void _init_dma_pio_capture(PIO pio, uint sm);
+void _init_dma_pio_capture(uint8_t sensor);
 
 /**
  * @brief
@@ -683,12 +699,13 @@ uint64_t _hamming_weight(uint64_t bits_in);
 /**
  * @brief finds the position of a 17-bit sequence (bits) in the sequence generated by polynomial3 with initial seed 1
  *
+ * @param[in] sensor:   which TS4231 sensor is associated with this data structure (valid values [0-3])
  * @param[in] index: index of polynomial
  * @param[in] bits: 17-bit sequence
  *
  * @return count: location of the sequence
  */
-uint32_t _reverse_count_p(uint8_t index, uint32_t bits);
+uint32_t _reverse_count_p(uint8_t sensor, uint8_t index, uint32_t bits);
 
 /**
  * @brief add one element to the ring buffer for spi captures
@@ -718,12 +735,13 @@ void _fill_hash_table(uint16_t *hash_table);
 /**
  * @brief Accesses the global tables _lfsr_checkpoint_hashtable & _lfsr_checkpoint_count
  *        and updates them with the last found polynomial count
- *
+ * 
+ * @param[in] sensor:   which TS4231 sensor is associated with this data structure (valid values [0-3])
  * @param[in] polynomial: index of polynomial
  * @param[in] bits: 17-bit sequence
  * @param[in] count: position of the received laser sweep in the LSFR sequence
  */
-void _update_lfsr_checkpoints(uint8_t polynomial, uint32_t bits, uint32_t count);
+void _update_lfsr_checkpoints(uint8_t sensor, uint8_t polynomial, uint32_t bits, uint32_t count);
 
 /**
  * @brief LH2 sweeps come with an almost perfect 20ms difference.
@@ -738,21 +756,26 @@ uint8_t _select_sweep(db_lh2_t *lh2, uint8_t polynomial, absolute_time_t timesta
 /**
  * @brief ISR that copies the data generated by the PIO capture of the TS4231 into a ring buffer
  */
-void pio_irq_handler(void);
+void _pio_irq_handler_generic(uint8_t sensor);
+void pio_irq_handler_0(void);
+void pio_irq_handler_1(void);
+void pio_irq_handler_2(void);
+void pio_irq_handler_3(void);
 
 //=========================== public ===========================================
 
-void db_lh2_init(db_lh2_t *lh2, const uint8_t gpio_d, const uint8_t gpio_e) {
+void db_lh2_init(db_lh2_t *lh2, uint8_t sensor, const uint8_t gpio_d, const uint8_t gpio_e) {
     // Initialize the TS4231 on power-up - this is only necessary when power-cycling
     _initialize_ts4231(gpio_d, gpio_e);
 
     // Setup the LH2 local variables
-    memset(_lh2_vars.spi_rx_buffer, 0, TS4231_CAPTURE_BUFFER_SIZE);
+    memset(_lh2_vars[sensor].spi_rx_buffer, 0, TS4231_CAPTURE_BUFFER_SIZE);
     // initialize the spi ring buffer
-    memset(&_lh2_vars.data, 0, sizeof(lh2_ring_buffer_t));
+    memset(&_lh2_vars[sensor].data, 0, sizeof(lh2_ring_buffer_t));
 
     // Setup LH2 data
-    lh2->spi_ring_buffer_count_ptr = &_lh2_vars.data.count;  // pointer to the size of the spi ring buffer,
+    lh2->spi_ring_buffer_count_ptr = &_lh2_vars[sensor].data.count;  // pointer to the size of the spi ring buffer,
+    lh2->sensor                    = sensor;                         // store the sensor number inside the public lh2 structure.
 
     for (uint8_t sweep = 0; sweep < LH2_SWEEP_COUNT; sweep++) {
         for (uint8_t basestation = 0; basestation < LH2_SWEEP_COUNT; basestation++) {
@@ -765,28 +788,77 @@ void db_lh2_init(db_lh2_t *lh2, const uint8_t gpio_d, const uint8_t gpio_e) {
             lh2->data_ready[sweep][basestation]                    = DB_LH2_NO_NEW_DATA;
         }
     }
-    memset(_lh2_vars.data.buffer[0], 0, LH2_BUFFER_SIZE);
+    memset(_lh2_vars[sensor].data.buffer[0], 0, LH2_BUFFER_SIZE);
 
     // Initialize the hash table for the lsfr checkpoints
     _fill_hash_table(_end_buffers_hashtable);
 
     // Configure the PIO and the DMA for the TS4231 capture
-    PIO  pio    = pio0;
-    uint offset = pio_add_program(pio, &ts4231_capture_program);
-    uint sm     = pio_claim_unused_sm(pio, true);
+    // Retrieve pio and sm dinamically, and store them in the global variable.
 
-    // Find a free irq
-    int8_t pio_irq = PIO0_IRQ_0;
-    pio_set_irq0_source_enabled(pio, pis_interrupt0, true);  // Set pio to tell us when the FIFO is NOT empty
+    // do the per-sensor configuration
+    PIO    pio;
+    uint   sm;
+    int8_t pio_irq;
 
-    // Enable interrupt
-    irq_set_exclusive_handler(pio_irq, pio_irq_handler);
-    // irq_add_shared_handler(pio_irq, pio_irq_handler, PICO_SHARED_IRQ_HANDLER_DEFAULT_ORDER_PRIORITY);  // Add a shared IRQ handler
+    switch (sensor) {
+        case 0:
+            pio     = pio0;
+            sm      = 0;
+            pio_irq = PIO0_IRQ_0;
+            // Enable interrupt
+            pio_set_irq0_source_enabled(pio, pis_interrupt0, true);  // Connect the SM interrupt to system IRQ
+            irq_set_exclusive_handler(pio_irq, pio_irq_handler_0);
+            break;
+
+        case 1:
+            pio     = pio0;
+            sm      = 1;
+            pio_irq = PIO0_IRQ_1;
+            // Enable interrupt
+            pio_set_irq1_source_enabled(pio, pis_interrupt1, true);  // Connect the SM interrupt to system IRQ
+            irq_set_exclusive_handler(pio_irq, pio_irq_handler_1);
+            break;
+
+        case 2:
+            pio     = pio1;
+            sm      = 0;
+            pio_irq = PIO1_IRQ_0;
+            // Enable interrupt
+            pio_set_irq0_source_enabled(pio, pis_interrupt0, true);  // Connect the SM interrupt to system IRQ
+            irq_set_exclusive_handler(pio_irq, pio_irq_handler_2);
+            break;
+
+        case 3:
+            pio     = pio1;
+            sm      = 1;
+            pio_irq = PIO1_IRQ_1;
+            // Enable interrupt
+            pio_set_irq1_source_enabled(pio, pis_interrupt1, true);  // Connect the SM interrupt to system IRQ
+            irq_set_exclusive_handler(pio_irq, pio_irq_handler_3);
+            break;
+
+        default:
+            break;
+    }
+
+    // only once per reboot, save the pio program to pio memory
+    if (!_pio_vars.init_flag) {
+        _pio_vars.offset[0] = pio_add_program(pio0, &ts4231_capture_program);
+        _pio_vars.offset[1] = pio_add_program(pio1, &ts4231_capture_program);
+        _pio_vars.init_flag = true;
+    }
+
+    // Save the correct pio and sm values
+    _lh2_vars[sensor].pio = pio;
+    _lh2_vars[sensor].sm  = sm;
+
+    // retrieve the correct offset
+    uint offset = (pio == pio0) ? _pio_vars.offset[0] : _pio_vars.offset[1];
     irq_set_enabled(pio_irq, true);  // Enable the IRQ
-
     // Enable PIO and DMA
-    _init_dma_pio_capture(pio, sm);
-    ts4231_capture_program_init(pio, sm, offset, gpio_d, 5);
+    _init_dma_pio_capture(sensor);
+    ts4231_capture_program_init(pio, sm, offset, gpio_d);
 }
 
 void db_lh2_start(void) {
@@ -800,7 +872,9 @@ void db_lh2_stop(void) {
 }
 
 void db_lh2_process_location(db_lh2_t *lh2) {
-    if (_lh2_vars.data.count == 0) {
+    uint8_t sensor = lh2->sensor;  // Make a local copy of the sensor number, for readability's sake
+
+    if (_lh2_vars[sensor].data.count == 0) {
         return;
     }
 
@@ -816,16 +890,20 @@ void db_lh2_process_location(db_lh2_t *lh2) {
 
     // stop the interruptions while you're reading the data.
     absolute_time_t temp_timestamp = nil_time;  // default timestamp
-    if (!_get_from_ts4231_ring_buffer(&_lh2_vars.data, temp_spi_bits, &temp_timestamp)) {
+    if (!_get_from_ts4231_ring_buffer(&_lh2_vars[sensor].data, temp_spi_bits, &temp_timestamp)) {
         return;
     }
     // perform the demodulation + poly search on the received packets
-    // convert the SPI reading to bits via zero-crossing counter demodulation and differential/biphasic manchester decoding
+    // convert the SPI reading to bits via zero-crossing counter demodulation and differential/biphasic manchester decoding.
+    gpio_put(11, 1);
     uint64_t temp_bits_sweep = _demodulate_light(temp_spi_bits);
+    gpio_put(11, 0);
 
     // figure out which polynomial each one of the two samples come from.
-    int8_t  temp_bit_offset          = 0;  // default offset
+    int8_t temp_bit_offset = 0;  // default offset
+    gpio_put(12, 1);
     uint8_t temp_selected_polynomial = _determine_polynomial(temp_bits_sweep, &temp_bit_offset);
+    gpio_put(12, 0);
 
     // If there was an error with the polynomial, leave without updating anything
     if (temp_selected_polynomial == LH2_POLYNOMIAL_ERROR_INDICATOR) {
@@ -851,10 +929,13 @@ void db_lh2_process_location(db_lh2_t *lh2) {
     }
 
     // Compute and save the lsfr location.
+    gpio_put(13, 1);
     uint32_t lfsr_loc_temp = _reverse_count_p(
-                                 temp_selected_polynomial,
-                                 temp_bits_sweep >> (47 - temp_bit_offset)) -
-                             temp_bit_offset;
+                                sensor,
+                                temp_selected_polynomial,
+                                temp_bits_sweep >> (47 - temp_bit_offset)) -
+                            temp_bit_offset;
+    gpio_put(13, 0);
 
     //*********************************************************************************//
     //                                 Store results                                   //
@@ -987,25 +1068,30 @@ void _initialize_ts4231(const uint8_t gpio_d, const uint8_t gpio_e) {
     sleep_us(50000);
 }
 
-void _init_dma_pio_capture(PIO pio, uint sm) {
+void _init_dma_pio_capture(uint8_t sensor) {
+    // TODO: The problem is here
+    // Make local copies of important variables, for readability.
+    PIO     pio = _lh2_vars[sensor].pio;
+    uint8_t sm  = _lh2_vars[sensor].sm;
 
     // Configure PIO->Temp Buffer DMA
     int chan = dma_claim_unused_channel(true);
+    _lh2_vars[sensor].dma_channel = chan;       // save which channel belongs to which sensor
 
     dma_channel_config c = dma_channel_get_default_config(chan);
-    channel_config_set_transfer_data_size(&c, DMA_SIZE_8);     // Transfer 32 bits at a time (max possible)
+    channel_config_set_transfer_data_size(&c, DMA_SIZE_8);      // Transfer 32 bits at a time (max possible)
     channel_config_set_read_increment(&c, false);               // reading from PIO FIFO, no need to increment
     channel_config_set_write_increment(&c, true);               // writing to temp buffer, increment
     channel_config_set_dreq(&c, pio_get_dreq(pio, sm, false));  // tie the DMA channel to the PIO capture
     // channel_config_set_ring(&c, true, 4);                       // 4 means reset address after (1 << 4) = 16 words transfers, or 64 bytes (TS4231_CAPTURE_BUFFER_SIZE)
 
     dma_channel_configure(
-        chan,                     // Channel to be configured
-        &c,                       // The configuration we just created
-        _lh2_vars.spi_rx_buffer,  // The initial write address (temp buffer for the PIO capture)
-        &pio->rxf[sm],            // The initial read address (PIO RX FIFO)
-        64,                       // Transfer 1 word per data request.
-        true                      // Start immediately.
+        chan,                             // Channel to be configured
+        &c,                               // The configuration we just created
+        _lh2_vars[sensor].spi_rx_buffer,  // The initial write address (temp buffer for the PIO capture)
+        &pio->rxf[sm],                    // The initial read address (PIO RX FIFO)
+        64,                               // Transfer 1 word per data request.
+        true                              // Start immediately.
     );
 }
 
@@ -1377,7 +1463,7 @@ uint64_t _hamming_weight(uint64_t bits_in) {  // TODO: bad name for function? or
     return weight;
 }
 
-uint32_t _reverse_count_p(uint8_t index, uint32_t bits) {
+uint32_t _reverse_count_p(uint8_t sensor, uint8_t index, uint32_t bits) {
 
     bits                 = bits & 0x0001FFFF;  // initialize buffer to initial bits, masked
     uint32_t buffer_down = bits;
@@ -1410,14 +1496,14 @@ uint32_t _reverse_count_p(uint8_t index, uint32_t bits) {
         hash_index_down = _end_buffers_hashtable[(buffer_down >> 2) & HASH_TABLE_MASK] & CHECKPOINT_TABLE_MASK_LOW;
         if (buffer_down == _end_buffers_local[hash_index_down]) {
             count_down = count_down + 2048 * hash_index_down - 1;
-            _update_lfsr_checkpoints(index, bits, count_down);
+            _update_lfsr_checkpoints(sensor, index, bits, count_down);
             return count_down;
         }
         // Upper hash option in the hash table
         hash_index_down = (_end_buffers_hashtable[(buffer_down >> 2) & HASH_TABLE_MASK] & CHECKPOINT_TABLE_MASK_HIGH) >> CHECKPOINT_TABLE_BITS;
         if (buffer_down == _end_buffers_local[hash_index_down]) {
             count_down = count_down + 2048 * hash_index_down - 1;
-            _update_lfsr_checkpoints(index, bits, count_down);
+            _update_lfsr_checkpoints(sensor, index, bits, count_down);
             return count_down;
         }
 
@@ -1426,38 +1512,38 @@ uint32_t _reverse_count_p(uint8_t index, uint32_t bits) {
         hash_index_up = _end_buffers_hashtable[(buffer_up >> 2) & HASH_TABLE_MASK] & CHECKPOINT_TABLE_MASK_LOW;
         if (buffer_up == _end_buffers_local[hash_index_up]) {
             count_up = 2048 * hash_index_up - count_up - 1;
-            _update_lfsr_checkpoints(index, bits, count_up);
+            _update_lfsr_checkpoints(sensor, index, bits, count_up);
             return count_up;
         }
         // Upper hash option in the hash table
         hash_index_up = (_end_buffers_hashtable[(buffer_up >> 2) & HASH_TABLE_MASK] & CHECKPOINT_TABLE_MASK_HIGH) >> CHECKPOINT_TABLE_BITS;
         if (buffer_up == _end_buffers_local[hash_index_up]) {
             count_up = 2048 * hash_index_up - count_up - 1;
-            _update_lfsr_checkpoints(index, bits, count_up);
+            _update_lfsr_checkpoints(sensor, index, bits, count_up);
             return count_up;
         }
 
         // Check the dynamical checkpoints, backward
-        if (buffer_down == _lfsr_checkpoint_bits[index][0]) {
-            count_down = count_down + _lfsr_checkpoint_count[index][0];
-            _update_lfsr_checkpoints(index, bits, count_down);
+        if (buffer_down == _lh2_vars[sensor].checkpoint.bits[index][0]) {
+            count_down = count_down + _lh2_vars[sensor].checkpoint.count[index][0];
+            _update_lfsr_checkpoints(sensor, index, bits, count_down);
             return count_down;
         }
-        if (buffer_down == _lfsr_checkpoint_bits[index][1]) {
-            count_down = count_down + _lfsr_checkpoint_count[index][1];
-            _update_lfsr_checkpoints(index, bits, count_down);
+        if (buffer_down == _lh2_vars[sensor].checkpoint.bits[index][1]) {
+            count_down = count_down + _lh2_vars[sensor].checkpoint.count[index][1];
+            _update_lfsr_checkpoints(sensor, index, bits, count_down);
             return count_down;
         }
 
         // Check the dynamical checkpoints, forward
-        if (buffer_up == _lfsr_checkpoint_bits[index][0]) {
-            count_up = _lfsr_checkpoint_count[index][0] - count_up;
-            _update_lfsr_checkpoints(index, bits, count_up);
+        if (buffer_up == _lh2_vars[sensor].checkpoint.bits[index][0]) {
+            count_up = _lh2_vars[sensor].checkpoint.count[index][0] - count_up;
+            _update_lfsr_checkpoints(sensor, index, bits, count_up);
             return count_up;
         }
-        if (buffer_up == _lfsr_checkpoint_bits[index][1]) {
-            count_up = _lfsr_checkpoint_count[index][1] - count_up;
-            _update_lfsr_checkpoints(index, bits, count_up);
+        if (buffer_up == _lh2_vars[sensor].checkpoint.bits[index][1]) {
+            count_up = _lh2_vars[sensor].checkpoint.count[index][1] - count_up;
+            _update_lfsr_checkpoints(sensor, index, bits, count_up);
             return count_up;
         }
 
@@ -1522,17 +1608,17 @@ void _fill_hash_table(uint16_t *hash_table) {
     }
 }
 
-void _update_lfsr_checkpoints(uint8_t polynomial, uint32_t bits, uint32_t count) {
+void _update_lfsr_checkpoints(uint8_t sensor, uint8_t polynomial, uint32_t bits, uint32_t count) {
 
     // Update the current running weighted sum. 75% of old value +25% of new value
-    _lsfr_checkpoint_average = (((_lsfr_checkpoint_average * 3) >> 2) + (count >> 2));
+    _lh2_vars[sensor].checkpoint.average = (((_lh2_vars[sensor].checkpoint.average * 3) >> 2) + (count >> 2));
 
     // Is the new count higher or lower than the current running average.
-    uint8_t index = count <= _lsfr_checkpoint_average ? 0 : 1;
+    uint8_t index = count <= _lh2_vars[sensor].checkpoint.average ? 0 : 1;
 
     // Save the new count in the correct place in the checkpoint array
-    _lfsr_checkpoint_bits[polynomial][index]  = bits;
-    _lfsr_checkpoint_count[polynomial][index] = count;
+    _lh2_vars[sensor].checkpoint.bits[polynomial][index]  = bits;
+    _lh2_vars[sensor].checkpoint.count[polynomial][index] = count;
 }
 
 uint8_t _select_sweep(db_lh2_t *lh2, uint8_t polynomial, absolute_time_t timestamp) {
@@ -1629,23 +1715,43 @@ uint8_t _select_sweep(db_lh2_t *lh2, uint8_t polynomial, absolute_time_t timesta
 
 //=========================== interrupts =======================================
 
-void pio_irq_handler(void) {
-    // TODO Remove hardcooded pio0/sm references
-    // printf("Bef: PIO0->IRQ = %08b, FIFO RX = %d, RingBuff = %d, DMA_tx_count = %d\n", pio0_hw->irq,pio_sm_get_rx_fifo_level(pio0,0), _lh2_vars.data.count, dma_hw->ch[_lh2_vars.dma_channel].transfer_count);
+void _pio_irq_handler_generic(uint8_t sensor) {
+    // Make local copies of important variables, for readability.
+    PIO     pio = _lh2_vars[sensor].pio;
+    uint8_t sm  = _lh2_vars[sensor].sm;
+
     gpio_put(10, 1);
+
     // Read the current time.
     absolute_time_t timestamp = get_absolute_time();
     // Add new reading to the ring buffer
-    _add_to_ts4231_ring_buffer(&_lh2_vars.data, _lh2_vars.spi_rx_buffer, timestamp);
-    pio_sm_clear_fifos(pio0, 0);  // Purge the PIO FIFO from any straggling bits
+    _add_to_ts4231_ring_buffer(&_lh2_vars[sensor].data, _lh2_vars[sensor].spi_rx_buffer, timestamp);
+    pio_sm_clear_fifos(pio, sm);  // Purge the PIO FIFO from any straggling bits
     // reset the DMA channel
-    dma_channel_set_trans_count(_lh2_vars.dma_channel, 64, false);
-    dma_channel_set_write_addr(_lh2_vars.dma_channel, _lh2_vars.spi_rx_buffer, true);
+    dma_channel_set_trans_count(_lh2_vars[sensor].dma_channel, 64, false);
+    dma_channel_set_write_addr(_lh2_vars[sensor].dma_channel, _lh2_vars[sensor].spi_rx_buffer, true);
     // Clear the PIO interrupt
-    pio_interrupt_clear(pio0, 0);
+    pio_interrupt_clear(pio, sm);
+
     gpio_put(10, 0);
-    // for (size_t i = 0; i < 6; i++) {
-    //     printf("buffer[%d-%d] = %08b %08b\n", 2 * i, 2 * i + 1, _lh2_vars.spi_rx_buffer[2 * i], _lh2_vars.spi_rx_buffer[2 * i + 1]);
-    // }
 }
-// pio_interrupt_clear(pio, sm);
+
+// Each ISR calls the same handler, for the appropriate sensor index.
+void pio_irq_handler_0(void) {
+        // printf("irq 0");
+
+    _pio_irq_handler_generic(0);
+}
+
+void pio_irq_handler_1(void) {
+            // printf("irq 1");
+    _pio_irq_handler_generic(1);
+}
+
+void pio_irq_handler_2(void) {
+    _pio_irq_handler_generic(2);
+}
+
+void pio_irq_handler_3(void) {
+    _pio_irq_handler_generic(3);
+}

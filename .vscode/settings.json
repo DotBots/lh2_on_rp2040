@@ -23,7 +23,8 @@
       },
     "cmake.generator": "Unix Makefiles",
     "files.associations": {
-        "pio_instructions.h": "c"
+        "pio_instructions.h": "c",
+        "irq.h": "c"
     },
     //   "cmake.buildDirectory": "${workspaceFolder}/build"
 }
