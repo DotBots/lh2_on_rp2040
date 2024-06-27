@@ -96,9 +96,11 @@ int main() {
             // printf("Out: PIO0->IRQ = %08b, FIFO RX = %d, RingBuff = %d, DMA_tx_count = %d\n", pio0_hw->irq, pio_sm_get_rx_fifo_level(pio0, 0), *_lh2.spi_ring_buffer_count_ptr, dma_hw->ch[0].transfer_count);
             // printf("sensor_0 FIFO RX = %d, RingBuff = %d, DMA_tx_count = %d\n", pio_sm_get_rx_fifo_level(pio0, 0), *_lh2_1.spi_ring_buffer_count_ptr, dma_hw->ch[0].transfer_count);
             // printf("sensor_1 FIFO RX = %d, RingBuff = %d, DMA_tx_count = %d\n", pio_sm_get_rx_fifo_level(pio0, 1), *_lh2_0.spi_ring_buffer_count_ptr, dma_hw->ch[1].transfer_count);
-            printf("sensor_0 (%d, %d) (%d,%d)\t sensor_1 (%d, %d) (%d,%d)\n", 
+            printf("sensor_0 (%d, %d) (%d,%d) (%d, %d) (%d,%d)\t sensor_1 (%d, %d) (%d,%d) (%d, %d) (%d,%d)\n", 
             _lh2_0.locations[0][0].selected_polynomial, _lh2_0.locations[0][0].lfsr_location, _lh2_0.locations[1][0].selected_polynomial, _lh2_0.locations[1][0].lfsr_location,
-            _lh2_1.locations[0][0].selected_polynomial, _lh2_1.locations[0][0].lfsr_location, _lh2_1.locations[1][0].selected_polynomial, _lh2_1.locations[1][0].lfsr_location);
+            _lh2_0.locations[0][1].selected_polynomial, _lh2_0.locations[0][1].lfsr_location, _lh2_0.locations[1][1].selected_polynomial, _lh2_0.locations[1][1].lfsr_location,
+            _lh2_1.locations[0][0].selected_polynomial, _lh2_1.locations[0][0].lfsr_location, _lh2_1.locations[1][0].selected_polynomial, _lh2_1.locations[1][0].lfsr_location,
+            _lh2_1.locations[0][1].selected_polynomial, _lh2_1.locations[0][1].lfsr_location, _lh2_1.locations[1][1].selected_polynomial, _lh2_1.locations[1][1].lfsr_location);
             timer = get_absolute_time();
         }
     }
