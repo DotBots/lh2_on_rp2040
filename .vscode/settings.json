@@ -24,7 +24,8 @@
     "cmake.generator": "Unix Makefiles",
     "files.associations": {
         "pio_instructions.h": "c",
-        "irq.h": "c"
+        "irq.h": "c",
+        "multicore.h": "c"
     },
     //   "cmake.buildDirectory": "${workspaceFolder}/build"
 }
