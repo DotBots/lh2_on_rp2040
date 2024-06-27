@@ -31,6 +31,7 @@ pico_generate_pio_header(${PROJECT_NAME} ${CMAKE_CURRENT_LIST_DIR}/src/ts4231_ca
 target_link_libraries(${PROJECT_NAME} 
         pico_stdlib
         hardware_pio
+        pico_multicore
         pico_cyw43_arch_none
         )
 
