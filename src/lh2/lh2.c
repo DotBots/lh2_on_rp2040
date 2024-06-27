@@ -1738,13 +1738,10 @@ void _pio_irq_handler_generic(uint8_t sensor) {
 
 // Each ISR calls the same handler, for the appropriate sensor index.
 void pio_irq_handler_0(void) {
-        // printf("irq 0");
-
     _pio_irq_handler_generic(0);
 }
 
 void pio_irq_handler_1(void) {
-            // printf("irq 1");
     _pio_irq_handler_generic(1);
 }
 
