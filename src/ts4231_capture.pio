@@ -54,7 +54,7 @@ sample_loop:
 
 
 % c-sdk {
-static inline void ts4231_capture_program_init(PIO pio, uint sm, uint offset, uint pin, uint side_pin) {
+static inline void ts4231_capture_program_init(PIO pio, uint sm, uint offset, uint pin) {
     pio_sm_config c = ts4231_capture_program_get_default_config(offset);
 
     // Set the IN base pin to the provided `pin` parameter. This is the data
@@ -65,15 +65,12 @@ static inline void ts4231_capture_program_init(PIO pio, uint sm, uint offset, ui
     // Connect these GPIOs to this PIO block
     pio_gpio_init(pio, pin);
     pio_gpio_init(pio, pin + 1);
-    // Disable the inpupt synchronizer to get faster sampling
-    // hw_set_bits(&pio->input_sync_bypass, 1u << pin);
-    // hw_set_bits(&pio->input_sync_bypass, 1u << (pin+1));
 
     // Config ths side set pin
-    sm_config_set_sideset_pins(&c, side_pin);
-    pio_sm_set_consecutive_pindirs(pio, sm, side_pin, 2, true);
-    pio_gpio_init(pio, side_pin);
-    pio_gpio_init(pio, side_pin + 1);
+    sm_config_set_sideset_pins(&c, pin+2);
+    pio_sm_set_consecutive_pindirs(pio, sm, pin+2, 2, true);
+    pio_gpio_init(pio, pin + 2);
+    pio_gpio_init(pio, pin + 3);
 
     // Shifting to left matches the customary MSB-first ordering of SPI.
     sm_config_set_in_shift(
