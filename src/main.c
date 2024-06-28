@@ -24,24 +24,32 @@
 
 //=========================== defines ==========================================
 
-#define LH2_0_DATA_PIN 3                     // The Envelope pin will be (Data pin + 1)
+#define LH2_0_DATA_PIN 0                     // 
 #define LH2_0_ENV_PIN  (LH2_0_DATA_PIN + 1)  // The Envelope pin will be (Data pin + 1)
-#define LH2_1_DATA_PIN 20                    // The Envelope pin will be (Data pin + 1)
+#define LH2_1_DATA_PIN 5                     // 
 #define LH2_1_ENV_PIN  (LH2_1_DATA_PIN + 1)  // The Envelope pin will be (Data pin + 1)
+#define LH2_2_DATA_PIN 15                    // 
+#define LH2_2_ENV_PIN  (LH2_2_DATA_PIN + 1)  // The Envelope pin will be (Data pin + 1)
+#define LH2_3_DATA_PIN 21                    // 
+#define LH2_3_ENV_PIN  (LH2_3_DATA_PIN + 1)  // The Envelope pin will be (Data pin + 1)
 #define TIMER_DELAY_US 100000
 
-#define DEBUG_SIDE_SET_PIN 5
+
 
 //=========================== variables ========================================
 
 // is nedeed so the variable is accesible to both cores [1]
-db_lh2_t _lh2_0;
-db_lh2_t _lh2_1;
+db_lh2_t        _lh2_0;
+db_lh2_t        _lh2_1;
+db_lh2_t        _lh2_2;
+db_lh2_t        _lh2_3;
 absolute_time_t timer_0;
 bool            clk_conf_OK;
 
 uint8_t sensor_0 = 0;
 uint8_t sensor_1 = 1;
+uint8_t sensor_2 = 2;
+uint8_t sensor_3 = 3;
 
 //=========================== prototypes ========================================
 
@@ -53,21 +61,38 @@ int main() {
     // configure the clock for 128MHz
     clk_conf_OK = set_sys_clock_khz(128000, true);
 
-    gpio_init(19);
-    gpio_set_dir(19, GPIO_OUT);
-    gpio_put(19, 1);
+    // power up sensor 1
+    gpio_init(4);
+    gpio_set_dir(4, GPIO_OUT);
+    gpio_put(4, 1);
 
+    // power up sensor 2
+    gpio_init(14);
+    gpio_set_dir(14, GPIO_OUT);
+    gpio_put(14, 1);
+
+    // power up sensor 3
+    gpio_init(20);
+    gpio_set_dir(20, GPIO_OUT);
+    gpio_put(20, 1);
+
+    // init the USB UART
     stdio_init_all();
     sleep_ms(3000);
     printf("Start code\n");
 
+    // set-up the on-board LED
+    // cyw43_arch_init();
+    // cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, 1);
+
     // LH2 config, before starting the second core
     db_lh2_init(&_lh2_0, sensor_0, LH2_0_DATA_PIN, LH2_0_ENV_PIN);
+    db_lh2_init(&_lh2_1, sensor_1, LH2_1_DATA_PIN, LH2_1_ENV_PIN);
 
     // Launch the second core
     multicore_launch_core1(core1_entry);
 
-    // test gpio
+    // Debug Gpio
     gpio_init(10);
     gpio_set_dir(10, GPIO_OUT);
     gpio_init(11);
@@ -81,44 +106,40 @@ int main() {
     gpio_put(12, 1);
     gpio_put(13, 1);
 
-    cyw43_arch_init();
-    cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, 1);
-
     timer_0 = get_absolute_time();
 
-    while (1) {
-        // wait until something happens e.g. an SPI interrupt
-        // __WFE();
+    while (true) {
 
         // the location function has to be running all the time
         db_lh2_process_location(&_lh2_0);
-        // printf("PIO0->IRQ = %08b,   PIO0->INTR = %012b,   PIO0->IRQ0_INTE = %012b,   SM_PC = %04x   FIFO RX = %d\n", pio0_hw->irq, pio0_hw->intr, pio0_hw->inte0, pio_sm_get_pc(pio0,0) ,pio_sm_get_rx_fifo_level(pio0,0));
+        db_lh2_process_location(&_lh2_1);
+
         if (absolute_time_diff_us(timer_0, get_absolute_time()) > TIMER_DELAY_US) {
 
-            // printf("Out: PIO0->IRQ = %08b, FIFO RX = %d, RingBuff = %d, DMA_tx_count = %d\n", pio0_hw->irq, pio_sm_get_rx_fifo_level(pio0, 0), *_lh2.spi_ring_buffer_count_ptr, dma_hw->ch[0].transfer_count);
-            // printf("sensor_0 FIFO RX = %d, RingBuff = %d, DMA_tx_count = %d\n", pio_sm_get_rx_fifo_level(pio0, 0), *_lh2_1.spi_ring_buffer_count_ptr, dma_hw->ch[0].transfer_count);
-            // printf("sensor_1 FIFO RX = %d, RingBuff = %d, DMA_tx_count = %d\n", pio_sm_get_rx_fifo_level(pio0, 1), *_lh2_0.spi_ring_buffer_count_ptr, dma_hw->ch[1].transfer_count);
-            printf("[CORE 0] sensor_0 (%d, %d) (%d,%d) (%d, %d) (%d,%d)\t sensor_1 (%d, %d) (%d,%d) (%d, %d) (%d,%d)\n",
+            printf("sen_0 (%d-%d %d-%d %d-%d %d-%d)   \tsen_1 (%d-%d %d-%d %d-%d %d-%d)   \tsen_2 (%d-%d %d-%d %d-%d %d-%d)   \tsen_3 (%d-%d %d-%d %d-%d %d-%d)\n",
                    _lh2_0.locations[0][0].selected_polynomial, _lh2_0.locations[0][0].lfsr_location, _lh2_0.locations[1][0].selected_polynomial, _lh2_0.locations[1][0].lfsr_location,
                    _lh2_0.locations[0][1].selected_polynomial, _lh2_0.locations[0][1].lfsr_location, _lh2_0.locations[1][1].selected_polynomial, _lh2_0.locations[1][1].lfsr_location,
                    _lh2_1.locations[0][0].selected_polynomial, _lh2_1.locations[0][0].lfsr_location, _lh2_1.locations[1][0].selected_polynomial, _lh2_1.locations[1][0].lfsr_location,
-                   _lh2_1.locations[0][1].selected_polynomial, _lh2_1.locations[0][1].lfsr_location, _lh2_1.locations[1][1].selected_polynomial, _lh2_1.locations[1][1].lfsr_location);
+                   _lh2_1.locations[0][1].selected_polynomial, _lh2_1.locations[0][1].lfsr_location, _lh2_1.locations[1][1].selected_polynomial, _lh2_1.locations[1][1].lfsr_location,
+                   _lh2_2.locations[0][0].selected_polynomial, _lh2_2.locations[0][0].lfsr_location, _lh2_2.locations[1][0].selected_polynomial, _lh2_2.locations[1][0].lfsr_location,
+                   _lh2_2.locations[0][1].selected_polynomial, _lh2_2.locations[0][1].lfsr_location, _lh2_2.locations[1][1].selected_polynomial, _lh2_2.locations[1][1].lfsr_location,
+                   _lh2_3.locations[0][0].selected_polynomial, _lh2_3.locations[0][0].lfsr_location, _lh2_3.locations[1][0].selected_polynomial, _lh2_3.locations[1][0].lfsr_location,
+                   _lh2_3.locations[0][1].selected_polynomial, _lh2_3.locations[0][1].lfsr_location, _lh2_3.locations[1][1].selected_polynomial, _lh2_3.locations[1][1].lfsr_location);
             timer_0 = get_absolute_time();
         }
     }
-
-    // one last instruction, doesn't do anything, it's just to have a place to put a breakpoint.
-    // __NOP();
 }
 
 //=========================== main core #0 =============================================
 
 void core1_entry() {
 
-    db_lh2_init(&_lh2_1, sensor_1, LH2_1_DATA_PIN, LH2_1_ENV_PIN);
+    db_lh2_init(&_lh2_2, sensor_2, LH2_2_DATA_PIN, LH2_2_ENV_PIN);
+    db_lh2_init(&_lh2_3, sensor_3, LH2_3_DATA_PIN, LH2_3_ENV_PIN);
 
-    while (1) {
-        db_lh2_process_location(&_lh2_1);
+    while (true) {
+        db_lh2_process_location(&_lh2_2);
+        db_lh2_process_location(&_lh2_3);
     }
 }
 

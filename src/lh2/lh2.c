@@ -1171,7 +1171,6 @@ void _pio_irq_handler_generic(uint8_t sensor) {
     uint8_t sm  = _lh2_vars[sensor].sm;
 
     gpio_put(10, 1);
-
     // Read the current time.
     absolute_time_t timestamp = get_absolute_time();
     // Add new reading to the ring buffer
