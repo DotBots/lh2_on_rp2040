@@ -5,17 +5,17 @@ Valve's Lighthouse v2 positioning system decoder implemented for the RP2040.
 4 `TS4231` are connected to a `RP2040`. The MCU receives and decodes data from two LH2 basestations.
 
 <p align="center">
-  <img src="static/hardware_setup.gif" alt="RP2040 with 4 TS4231 receiving pulses from 2 LH2 basestations"  width="400"/>
+  <img src="static/hardware_setup.gif" alt="RP2040 with 4 TS4231 receiving pulses from 2 LH2 basestations"  />
 </p>
 
 A logic analyser is connected to the system. It shows the arriving data, and how much time it takes the CPU to decode the data.
 <p align="center">
-  <img src="static/logic_analyser.gif" alt="Logic analyser data"  width="400"/>
+  <img src="static/logic_analyser.gif" alt="Logic analyser data"  />
 </p>
 
 The decoded data is printed to a serial port trough the USB. 
 <p align="center">
-  <img src="static/serial_log.gif" alt="Serial log with LH2 data"  width="400"/>
+  <img src="static/serial_log.gif" alt="Serial log with LH2 data"  />
 </p>
 
 
@@ -26,7 +26,7 @@ The capture data is automatically moved to a buffer in RAM using the DMA system.
 This signals the CPU to retrieve the data from the buffers and decode it. Each core of the `RP2040` monitors and processes two `TS4231` sensors
 
 <p align="center">
-  <img src="static/algorithm_explanation.png" alt="diagram of how the system works"  width="400"/>
+  <img src="static/algorithm_explanation.png" alt="diagram of how the system works" width="800" />
 </p>
 
 ### Results and Benchmark
@@ -37,12 +37,12 @@ Below is a capture from two sweeps of a basestation.
 All 8 pulses from a full sweep of the basestation, can be decoded in less than `3ms`.
 Full bench mark available [here](https://github.com/DotBots/lh2_on_rp2040/issues/2).
 <p align="center">
-  <img src="static/algorithm_explanation.png" alt="diagram of how the system works"  width="400"/>
+  <img src="static/benchmark.png" alt="diagram of how the system works"  width="800"/>
 </p>
 
 All the decoded information gets printed to the serial console in the following format.
 <p align="center">
-  <img src="static/serial_log_annotated.png" alt="diagram of how the system works"  width="400"/>
+  <img src="static/serial_log_annotated.png" alt="diagram of how the system works"  width="800"/>
 </p>
 
 ## Getting Started
