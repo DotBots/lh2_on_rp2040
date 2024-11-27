@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.12)
 
 # Set the Board
-set(PICO_BOARD pico_w)
+set(PICO_BOARD pico2)
 
 # Pull in SDK (must be before project)
 include($ENV{PICO_SDK_PATH}/external/pico_sdk_import.cmake)
@@ -31,8 +31,8 @@ pico_generate_pio_header(${PROJECT_NAME} ${CMAKE_CURRENT_LIST_DIR}/src/ts4231_ca
 target_link_libraries(${PROJECT_NAME} 
         pico_stdlib
         hardware_pio
+        hardware_dma
         pico_multicore
-        pico_cyw43_arch_none
         )
 
 # create map/bin/hex file etc.
