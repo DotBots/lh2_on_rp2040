@@ -71,7 +71,15 @@ export PICO_SDK_PATH=$PWD/pico-sdk
 3. Create a build directory and run CMAKE
 ```bash
 mkdir build && cd build
-cmake ..
+
+# For the Pico 2 board
+cmake .. -D"PICO_BOARD=pico2"
+# For the Pico 2W board
+cmake .. -D"PICO_BOARD=pico2_w"
+# For the Pico 1 board
+cmake .. -D"PICO_BOARD=pico"
+# For the Pico 1W board
+cmake .. -D"PICO_BOARD=pico_w"
 ```
 
 4. Build project
