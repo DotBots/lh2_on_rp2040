@@ -20,7 +20,7 @@
 
 //=========================== defines ==========================================
 
-#define LH2_BASESTATION_COUNT 4                          ///< Number of supported concurrent basestations
+#define LH2_BASESTATION_COUNT 16                         ///< Number of supported concurrent basestations
 #define LH2_POLYNOMIAL_COUNT  LH2_BASESTATION_COUNT * 2  ///< Number of supported LFSR polynomials, two per basestation
 #define LH2_SWEEP_COUNT       2                          ///< Number of laser sweeps per basestations rotation
 
@@ -51,7 +51,7 @@ typedef struct {
     absolute_time_t           timestamps[LH2_SWEEP_COUNT][LH2_BASESTATION_COUNT];  ///< timestamp of when the raw data was received
     db_lh2_data_ready_state_t data_ready[LH2_SWEEP_COUNT][LH2_BASESTATION_COUNT];  ///< Is the data in the buffer ready to send over radio, or has it already been sent ?
     uint8_t                  *spi_ring_buffer_count_ptr;                           ///< pointer to the SPI rung buffer packet count, so the user application can read how many spi captures are waiting to be processed.
-    uint8_t                   sensor;                                              //< Which TS4231 sensor is associated with this data structure (valid values [0-3]).
+    uint8_t                   sensor;                                              ///< Which TS4231 sensor is associated with this data structure (valid values [0-3]).
 } db_lh2_t;
 
 //=========================== public ===========================================

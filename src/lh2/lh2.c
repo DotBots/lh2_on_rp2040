@@ -33,8 +33,7 @@
 #define LH2_POLYNOMIAL_ERROR_INDICATOR         0xFF                                                           ///< indicate the polynomial index is invalid
 #define POLYNOMIAL_BIT_ERROR_INITIAL_THRESHOLD 4                                                              ///< initial threshold of polynomial error
 #define LH2_BUFFER_SIZE                        10                                                             ///< Amount of lh2 frames the buffer can contain
-#define HASH_TABLE_BITS                        11                                                             ///< How many bits will be used for the hashtable for the _end_buffers
-#define HASH_TABLE_SIZE                        (1 << HASH_TABLE_BITS)                                         ///< How big will the hashtable for the _end_buffers
+#define HASH_TABLE_BITS                        6                                                              ///< How many bits will be used for the hashtable for the _end_buffers
 #define HASH_TABLE_MASK                        ((1 << HASH_TABLE_BITS) - 1)                                   ///< Mask selecting the HAS_TABLE_BITS least significant bits
 #define DISTANCE_BETWEEN_LSFR_CHECKPOINTS      2048                                                           ///< How many lsfr checkpoints are per polynomial
 #define CHECKPOINT_TABLE_BITS                  6                                                              ///< How many bits will be used for the checkpoint table for the lfsr search
@@ -76,8 +75,6 @@ typedef struct {
 } pio_vars_t;
 
 //=========================== variables ========================================
-
-static uint16_t _end_buffers_hashtable[HASH_TABLE_SIZE] = { 0 };
 
 ///< Encodes in two bits which sweep slot of a particular basestation is empty, (1 means data, 0 means empty)
 typedef enum {
@@ -155,7 +152,7 @@ uint64_t _hamming_weight(uint64_t bits_in);
  *
  * @return count: location of the sequence
  */
-uint32_t _reverse_count_p(uint8_t sensor, uint8_t index, uint32_t bits);
+uint32_t _lfsr_index_search(uint8_t sensor, uint8_t index, uint32_t bits);
 
 /**
  * @brief add one element to the ring buffer for spi captures
@@ -176,16 +173,9 @@ void _add_to_ts4231_ring_buffer(lh2_ring_buffer_t *cb, uint8_t *data, absolute_t
 bool _get_from_ts4231_ring_buffer(lh2_ring_buffer_t *cb, uint8_t *data, absolute_time_t *timestamp);
 
 /**
- * @brief generates a hashtable from the LSFR checpoints and stores it in an array.
- *
- * @param[in]   hash_table  pointer to the array where the hashtable will be stored
- */
-void _fill_hash_table(uint16_t *hash_table);
-
-/**
  * @brief Accesses the global tables _lfsr_checkpoint_hashtable & _lfsr_checkpoint_count
  *        and updates them with the last found polynomial count
- * 
+ *
  * @param[in] sensor:   which TS4231 sensor is associated with this data structure (valid values [0-3])
  * @param[in] polynomial: index of polynomial
  * @param[in] bits: 17-bit sequence
@@ -239,9 +229,6 @@ void db_lh2_init(db_lh2_t *lh2, uint8_t sensor, const uint8_t gpio_d, const uint
         }
     }
     memset(_lh2_vars[sensor].data.buffer[0], 0, LH2_BUFFER_SIZE);
-
-    // Initialize the hash table for the lsfr checkpoints
-    _fill_hash_table(_end_buffers_hashtable);
 
     // Configure the PIO and the DMA for the TS4231 capture
     // Retrieve pio and sm dinamically, and store them in the global variable.
@@ -380,12 +367,19 @@ void db_lh2_process_location(db_lh2_t *lh2) {
 
     // Compute and save the lsfr location.
     gpio_put(3, 1);
-    uint32_t lfsr_loc_temp = _reverse_count_p(
-                                sensor,
-                                temp_selected_polynomial,
-                                temp_bits_sweep >> (47 - temp_bit_offset)) -
-                            temp_bit_offset;
+    uint32_t lfsr_loc_temp = _lfsr_index_search(
+                                 sensor,
+                                 temp_selected_polynomial,
+                                 temp_bits_sweep >> (47 - temp_bit_offset)) -
+                             temp_bit_offset;
     gpio_put(3, 0);
+
+    // Check that the count didn't fall on an illegal value
+    if (lfsr_loc_temp == 0) {
+        // Mark the data as wrong and keep going
+        lh2->data_ready[sweep][basestation] = DB_LH2_NO_NEW_DATA;
+        return;
+    }
 
     //*********************************************************************************//
     //                                 Store results                                   //
@@ -525,8 +519,8 @@ void _init_dma_pio_capture(uint8_t sensor) {
     uint8_t sm  = _lh2_vars[sensor].sm;
 
     // Configure PIO->Temp Buffer DMA
-    int chan = dma_claim_unused_channel(true);
-    _lh2_vars[sensor].dma_channel = chan;       // save which channel belongs to which sensor
+    int chan                      = dma_claim_unused_channel(true);
+    _lh2_vars[sensor].dma_channel = chan;  // save which channel belongs to which sensor
 
     dma_channel_config c = dma_channel_get_default_config(chan);
     channel_config_set_transfer_data_size(&c, DMA_SIZE_8);      // Transfer 32 bits at a time (max possible)
@@ -913,93 +907,92 @@ uint64_t _hamming_weight(uint64_t bits_in) {  // TODO: bad name for function? or
     return weight;
 }
 
-uint32_t _reverse_count_p(uint8_t sensor, uint8_t index, uint32_t bits) {
+uint32_t _lfsr_index_search(uint8_t sensor, uint8_t index, uint32_t bits) {
 
     bits                 = bits & 0x0001FFFF;  // initialize buffer to initial bits, masked
     uint32_t buffer_down = bits;
     uint32_t buffer_up   = bits;
 
-    uint32_t count_down      = 0;
-    uint32_t count_up        = 0;
-    uint32_t b17             = 0;
-    uint32_t b1              = 0;
-    uint32_t masked_buff     = 0;
-    uint8_t  hash_index_down = 0;
-    uint8_t  hash_index_up   = 0;
+    uint32_t count_down  = 0;
+    uint32_t count_up    = 0;
+    uint32_t count_final = 0;
+    uint32_t b17         = 0;
+    uint32_t b1          = 0;
+    uint32_t masked_buff = 0;
+    uint8_t  hash_down   = 0;
+    uint8_t  hash_up     = 0;
+    bool     success     = false;  // True if the LFSR search produced a valid result
 
     // Copy const variables (Flash) into local variables (RAM) to speed up execution.
-    uint32_t _end_buffers_local[NUM_LSFR_COUNT_CHECKPOINTS] = { 0 };
-    uint32_t polynomials_local                              = _polynomials[index];
+    uint32_t _lfsr_hash_table_local[NUM_LSFR_COUNT_CHECKPOINTS]  = { 0 };
+    uint32_t _lfsr_index_table_local[NUM_LSFR_COUNT_CHECKPOINTS] = { 0 };
+    uint32_t polynomials_local                                   = _polynomials[index];
     for (size_t i = 0; i < NUM_LSFR_COUNT_CHECKPOINTS; i++) {
-        _end_buffers_local[i] = _end_buffers[index][i];
+        _lfsr_hash_table_local[i]  = _lfsr_hash_table[index][i];
+        _lfsr_index_table_local[i] = _lfsr_index_table[index][i];
     }
 
-    while (buffer_up != _end_buffers_local[0])  // do until buffer reaches one of the saved states
-    {
+    // Start the iterative search
+    while (buffer_up != 0x00 && buffer_down != 0x00) {  // Check that the count has not fallen into an invalid state    {
 
         //
         // CHECKPOINT CHECKING
         //
 
-        // Check end_buffer backward count
-        // Lower hash option in the hash table
-        hash_index_down = _end_buffers_hashtable[(buffer_down >> 2) & HASH_TABLE_MASK] & CHECKPOINT_TABLE_MASK_LOW;
-        if (buffer_down == _end_buffers_local[hash_index_down]) {
-            count_down = count_down + 2048 * hash_index_down - 1;
-            _update_lfsr_checkpoints(sensor, index, bits, count_down);
-            return count_down;
-        }
-        // Upper hash option in the hash table
-        hash_index_down = (_end_buffers_hashtable[(buffer_down >> 2) & HASH_TABLE_MASK] & CHECKPOINT_TABLE_MASK_HIGH) >> CHECKPOINT_TABLE_BITS;
-        if (buffer_down == _end_buffers_local[hash_index_down]) {
-            count_down = count_down + 2048 * hash_index_down - 1;
-            _update_lfsr_checkpoints(sensor, index, bits, count_down);
-            return count_down;
+        // Check lfsr backward count against precomputed checkpoints
+        hash_down = (buffer_down >> 11) & HASH_TABLE_MASK;
+        if (buffer_down == _lfsr_hash_table_local[hash_down]) {
+            count_down  = count_down + _lfsr_index_table_local[hash_down];
+            count_final = count_down;
+            success     = true;  // mark the success of the search
+            break;
         }
 
-        // Check end_buffer forward count
-        // Lower hash option in the hash table
-        hash_index_up = _end_buffers_hashtable[(buffer_up >> 2) & HASH_TABLE_MASK] & CHECKPOINT_TABLE_MASK_LOW;
-        if (buffer_up == _end_buffers_local[hash_index_up]) {
-            count_up = 2048 * hash_index_up - count_up - 1;
-            _update_lfsr_checkpoints(sensor, index, bits, count_up);
-            return count_up;
-        }
-        // Upper hash option in the hash table
-        hash_index_up = (_end_buffers_hashtable[(buffer_up >> 2) & HASH_TABLE_MASK] & CHECKPOINT_TABLE_MASK_HIGH) >> CHECKPOINT_TABLE_BITS;
-        if (buffer_up == _end_buffers_local[hash_index_up]) {
-            count_up = 2048 * hash_index_up - count_up - 1;
-            _update_lfsr_checkpoints(sensor, index, bits, count_up);
-            return count_up;
+        // Check lfsr forward count against precomputed checkpoints
+        hash_up = (buffer_up >> 11) & HASH_TABLE_MASK;
+        if (buffer_up == _lfsr_hash_table_local[hash_up]) {
+            count_up    = _lfsr_index_table_local[hash_up] - count_up;
+            count_final = count_up;
+            success     = true;  // mark the success of the search
+            break;
         }
 
         // Check the dynamical checkpoints, backward
+        // Sweep 0
         if (buffer_down == _lh2_vars[sensor].checkpoint.bits[index][0]) {
-            count_down = count_down + _lh2_vars[sensor].checkpoint.count[index][0];
-            _update_lfsr_checkpoints(sensor, index, bits, count_down);
-            return count_down;
+            count_down  = count_down + _lh2_vars[sensor].checkpoint.count[index][0];
+            count_final = count_down;
+            success     = true;  // mark the success of the search
+            break;
         }
+        // Sweep 1
         if (buffer_down == _lh2_vars[sensor].checkpoint.bits[index][1]) {
-            count_down = count_down + _lh2_vars[sensor].checkpoint.count[index][1];
-            _update_lfsr_checkpoints(sensor, index, bits, count_down);
-            return count_down;
+            count_down  = count_down + _lh2_vars[sensor].checkpoint.count[index][1];
+            count_final = count_down;
+            success     = true;  // mark the success of the search
+            break;
         }
 
         // Check the dynamical checkpoints, forward
+        // Sweep 0
         if (buffer_up == _lh2_vars[sensor].checkpoint.bits[index][0]) {
-            count_up = _lh2_vars[sensor].checkpoint.count[index][0] - count_up;
-            _update_lfsr_checkpoints(sensor, index, bits, count_up);
-            return count_up;
+            count_up    = _lh2_vars[sensor].checkpoint.count[index][0] - count_up;
+            count_final = count_up;
+            success     = true;  // mark the success of the search
+            break;
         }
+        // Sweep 1
         if (buffer_up == _lh2_vars[sensor].checkpoint.bits[index][1]) {
-            count_up = _lh2_vars[sensor].checkpoint.count[index][1] - count_up;
-            _update_lfsr_checkpoints(sensor, index, bits, count_up);
-            return count_up;
+            count_up    = _lh2_vars[sensor].checkpoint.count[index][1] - count_up;
+            count_final = count_up;
+            success     = true;  // mark the success of the search
+            break;
         }
 
         //
         // LSFR UPDATE
         //
+
         // LSFR backward update
         b17         = buffer_down & 0x00000001;                                                      // save the "newest" bit of the buffer
         buffer_down = (buffer_down & (0x0001FFFE)) >> 1;                                             // shift the buffer right, backwards in time
@@ -1012,7 +1005,15 @@ uint32_t _reverse_count_p(uint8_t sensor, uint8_t index, uint32_t bits) {
         buffer_up = ((buffer_up << 1) | b1) & (0x0001FFFF);
         count_up++;
     }
-    return count_up;
+
+    // Return the found lfsr value
+    if (success) {
+        // Save a new dynamic checkpoint
+        _update_lfsr_checkpoints(sensor, index, bits, count_final);
+        return count_final;
+    } else {
+        return 0;
+    }
 }
 
 void _add_to_ts4231_ring_buffer(lh2_ring_buffer_t *cb, uint8_t *data, absolute_time_t timestamp) {
@@ -1041,21 +1042,6 @@ bool _get_from_ts4231_ring_buffer(lh2_ring_buffer_t *cb, uint8_t *data, absolute
     cb->count--;
 
     return true;
-}
-
-void _fill_hash_table(uint16_t *hash_table) {
-
-    // Iterate over all the checkpoints and save the HASH_TABLE_BITS 11 bits as a a index for the hashtable
-    for (size_t poly = 0; poly < LH2_POLYNOMIAL_COUNT; poly++) {
-        for (size_t checkpoint = 1; checkpoint < NUM_LSFR_COUNT_CHECKPOINTS; checkpoint++) {
-            if (hash_table[(_end_buffers[poly][checkpoint] >> 2) & HASH_TABLE_MASK] == 0) {  // We shift by 2 to the right because we precomputed that that hash has the least amount of collisions in the hash table
-
-                hash_table[(_end_buffers[poly][checkpoint] >> 2) & HASH_TABLE_MASK] = checkpoint & CHECKPOINT_TABLE_MASK_LOW;  // that element of the hash table is empty, copy the checkpoint into the lower 6 bits
-            } else {
-                hash_table[(_end_buffers[poly][checkpoint] >> 2) & HASH_TABLE_MASK] |= (checkpoint << CHECKPOINT_TABLE_BITS) & CHECKPOINT_TABLE_MASK_HIGH;  // If the element is already occupied, use the upper 6 bits
-            }
-        }
-    }
 }
 
 void _update_lfsr_checkpoints(uint8_t sensor, uint8_t polynomial, uint32_t bits, uint32_t count) {
