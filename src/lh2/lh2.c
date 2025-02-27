@@ -57,7 +57,6 @@ typedef struct {
 typedef struct {
     uint32_t bits[LH2_POLYNOMIAL_COUNT][LH2_SWEEP_COUNT];   ///< lfsr pseudo-random bits of the checkpoints
     uint32_t count[LH2_POLYNOMIAL_COUNT][LH2_SWEEP_COUNT];  ///< corresponding lfsr index of the checkpoints
-    uint32_t average;                                       ///< mid-point between the lfsr index of sweep0 and sweep1
 } _lfsr_checkpoint_t;
 
 typedef struct {
@@ -180,8 +179,9 @@ bool _get_from_ts4231_ring_buffer(lh2_ring_buffer_t *cb, uint8_t *data, absolute
  * @param[in] polynomial: index of polynomial
  * @param[in] bits: 17-bit sequence
  * @param[in] count: position of the received laser sweep in the LSFR sequence
+ * @param[in] sweep: 0 for the first sweep, and 1 for the second sweep
  */
-void _update_lfsr_checkpoints(uint8_t sensor, uint8_t polynomial, uint32_t bits, uint32_t count);
+void _update_lfsr_checkpoints(uint8_t sensor, uint8_t polynomial, uint32_t bits, uint32_t count, uint8_t sweep);
 
 /**
  * @brief LH2 sweeps come with an almost perfect 20ms difference.
@@ -351,35 +351,42 @@ void db_lh2_process_location(db_lh2_t *lh2) {
     uint8_t sweep = _select_sweep(lh2, temp_selected_polynomial, temp_timestamp);
 
     // Put the newly read polynomials in the data structure (polynomial 0,1 must map to LH0, 2,3 to LH1. This can be accomplish by  integer-dividing the selected poly in 2, a shift >> accomplishes this.)
-    // This structur always holds the two most recent sweeps from any lighthouse
+    // This structure always holds the two most recent sweeps from any lighthouse
     uint8_t basestation = temp_selected_polynomial >> 1;
 
     //*********************************************************************************//
-    //                           Compute Polynomial Count                              //
+    //                             Compute LFSR Position                               //
     //*********************************************************************************//
 
+    // Select the valid bits of the lfsr by applying the offset (he first few bits might be invalid, as detected by _determine_polynomial())
+    uint32_t temp_lfsr_bits = temp_bits_sweep >> (47 - temp_bit_offset);
+
     // Sanity check, make sure you don't start the LFSR search with a bit-sequence full of zeros.
-    if ((temp_bits_sweep >> (47 - temp_bit_offset)) == 0x000000) {
+    if (temp_lfsr_bits == 0x000000) {
         // Mark the data as wrong and keep going
         lh2->data_ready[sweep][basestation] = DB_LH2_NO_NEW_DATA;
         return;
     }
 
-    // Compute and save the lsfr location.
+    // Compute the lfsr location.
     gpio_put(3, 1);
-    uint32_t lfsr_loc_temp = _lfsr_index_search(
-                                 sensor,
-                                 temp_selected_polynomial,
-                                 temp_bits_sweep >> (47 - temp_bit_offset)) -
-                             temp_bit_offset;
+    uint32_t temp_lfsr_loc = _lfsr_index_search(sensor,
+                                                temp_selected_polynomial,
+                                                temp_lfsr_bits);
     gpio_put(3, 0);
 
     // Check that the count didn't fall on an illegal value
-    if (lfsr_loc_temp == 0) {
+    if (temp_lfsr_loc != 0) {
+        // Save a new dynamic checkpoint
+        _update_lfsr_checkpoints(sensor, temp_selected_polynomial, temp_lfsr_bits, temp_lfsr_loc, sweep);
+    } else {
         // Mark the data as wrong and keep going
         lh2->data_ready[sweep][basestation] = DB_LH2_NO_NEW_DATA;
         return;
     }
+
+    // Undo the bit offset introduced above, to get the LFSR position of the first bit that hit the sensor.
+    temp_lfsr_loc -= temp_bit_offset;
 
     //*********************************************************************************//
     //                                 Store results                                   //
@@ -391,7 +398,7 @@ void db_lh2_process_location(db_lh2_t *lh2) {
     lh2->raw_data[sweep][basestation].bits_sweep          = temp_bits_sweep;
     lh2->timestamps[sweep][basestation]                   = temp_timestamp;
     // Save processed location information
-    lh2->locations[sweep][basestation].lfsr_location       = lfsr_loc_temp;
+    lh2->locations[sweep][basestation].lfsr_location       = temp_lfsr_loc;
     lh2->locations[sweep][basestation].selected_polynomial = temp_selected_polynomial;
     // Mark the data point as processed
     lh2->data_ready[sweep][basestation] = DB_LH2_PROCESSED_DATA_AVAILABLE;
@@ -1008,8 +1015,6 @@ uint32_t _lfsr_index_search(uint8_t sensor, uint8_t index, uint32_t bits) {
 
     // Return the found lfsr value
     if (success) {
-        // Save a new dynamic checkpoint
-        _update_lfsr_checkpoints(sensor, index, bits, count_final);
         return count_final;
     } else {
         return 0;
@@ -1044,17 +1049,11 @@ bool _get_from_ts4231_ring_buffer(lh2_ring_buffer_t *cb, uint8_t *data, absolute
     return true;
 }
 
-void _update_lfsr_checkpoints(uint8_t sensor, uint8_t polynomial, uint32_t bits, uint32_t count) {
-
-    // Update the current running weighted sum. 75% of old value +25% of new value
-    _lh2_vars[sensor].checkpoint.average = (((_lh2_vars[sensor].checkpoint.average * 3) >> 2) + (count >> 2));
-
-    // Is the new count higher or lower than the current running average.
-    uint8_t index = count <= _lh2_vars[sensor].checkpoint.average ? 0 : 1;
+void _update_lfsr_checkpoints(uint8_t sensor, uint8_t polynomial, uint32_t bits, uint32_t count, uint8_t sweep) {
 
     // Save the new count in the correct place in the checkpoint array
-    _lh2_vars[sensor].checkpoint.bits[polynomial][index]  = bits;
-    _lh2_vars[sensor].checkpoint.count[polynomial][index] = count;
+    _lh2_vars[sensor].checkpoint.bits[polynomial][sweep]  = bits;
+    _lh2_vars[sensor].checkpoint.count[polynomial][sweep] = count;
 }
 
 uint8_t _select_sweep(db_lh2_t *lh2, uint8_t polynomial, absolute_time_t timestamp) {
