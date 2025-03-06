@@ -1,5 +1,7 @@
 #ignore Build folder
 build/
+build_test/
+.vscode/
 
 # Prerequisites
 *.d
