@@ -1,46 +1,28 @@
 cmake_minimum_required(VERSION 3.12)
 
-
 # Pull in SDK (must be before project)
-include($ENV{PICO_SDK_PATH}/external/pico_sdk_import.cmake)
+include(C:/EVA/Repositories/lh2_on_rp2040/pico-sdk/external/pico_sdk_import.cmake)
+# include($ENV{PICO_SDK_PATH}/external/pico_sdk_import.cmake)
 
 # Project name
 project(lh2 C CXX ASM)
-
 
 # C and C++ standard
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
 
-# Select wether to build the test or production
-set(TARGET_GROUP production CACHE STRING "Group to build")
-
-
 # Initialize the SDK
 pico_sdk_init()
 
+add_executable(${PROJECT_NAME}
+        src/main.c
+        # src/lh2/lh2.c
+        )
+
 # Add lh2 files
-include_directories(${CMAKE_SOURCE_DIR}/src/lh2)
-
-
-# Production configurations
-if(TARGET_GROUP STREQUAL production)
-        add_executable(${PROJECT_NAME}
-                src/main.c
-                src/lh2/lh2.c
-                )
-# Test configuration
-elseif(TARGET_GROUP STREQUAL test)
-        include(CTest)
-        add_executable(${PROJECT_NAME}
-                test/test_lh2.c
-                test/unity/unity.c
-                )
-        include_directories(${CMAKE_SOURCE_DIR}test/unity)
-        add_test(lh2_test ${PROJECT_NAME})
-else()
-        message(FATAL_ERROR "Given TARGET_GROUP unknown")
-endif()
+add_subdirectory(src/lh2)
+target_link_libraries(${PROJECT_NAME} lh2_lib)
+# include_directories(${CMAKE_SOURCE_DIR}/src/lh2)
         
 # Conver the PIO assembler
 pico_generate_pio_header(${PROJECT_NAME} ${CMAKE_CURRENT_LIST_DIR}/src/ts4231_capture.pio)
