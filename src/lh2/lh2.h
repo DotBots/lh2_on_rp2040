@@ -18,6 +18,12 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+// Definition needed for test builds, who don't have access to the full pico-SDK,
+// and thus, have no idea what an absolute_time_t is.
+#ifndef _PICO_TYPES_H
+typedef uint64_t absolute_time_t;
+#endif
+
 //=========================== defines ==========================================
 
 #define LH2_BASESTATION_COUNT 16                         ///< Number of supported concurrent basestations

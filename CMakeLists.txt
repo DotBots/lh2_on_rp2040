@@ -1,8 +1,7 @@
 cmake_minimum_required(VERSION 3.12)
 
 # Pull in SDK (must be before project)
-include(C:/EVA/Repositories/lh2_on_rp2040/pico-sdk/external/pico_sdk_import.cmake)
-# include($ENV{PICO_SDK_PATH}/external/pico_sdk_import.cmake)
+include($ENV{PICO_SDK_PATH}/external/pico_sdk_import.cmake)
 
 # Project name
 project(lh2 C CXX ASM)
