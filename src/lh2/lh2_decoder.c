@@ -20,14 +20,12 @@
 #include "lh2_decoder.h"
 #include "lh2_checkpoints.h"
 
-
 //=========================== defines =========================================
 
-#define FUZZY_CHIP                             0xFF                                                           ///< not sure what this is about
-#define LH2_POLYNOMIAL_ERROR_INDICATOR         0xFF                                                           ///< indicate the polynomial index is invalid
-#define POLYNOMIAL_BIT_ERROR_INITIAL_THRESHOLD 4                                                              ///< initial threshold of polynomial error
-#define HASH_TABLE_BITS                        6                                                              ///< How many bits will be used for the hashtable for the _end_buffers
-#define HASH_TABLE_MASK                        ((1 << HASH_TABLE_BITS) - 1)                                   ///< Mask selecting the HAS_TABLE_BITS least significant bits
+#define FUZZY_CHIP                             0xFF                          ///< not sure what this is about
+#define POLYNOMIAL_BIT_ERROR_INITIAL_THRESHOLD 4                             ///< initial threshold of polynomial error
+#define HASH_TABLE_BITS                        6                             ///< How many bits will be used for the hashtable for the _end_buffers
+#define HASH_TABLE_MASK                        ((1 << HASH_TABLE_BITS) - 1)  ///< Mask selecting the HAS_TABLE_BITS least significant bits
 
 //=========================== variables ========================================
 
@@ -82,7 +80,6 @@ uint64_t _hamming_weight(uint64_t bits_in);
 uint32_t _lfsr_index_search(_lfsr_checkpoint_t *checkpoint, uint8_t index, uint32_t bits);
 
 //=========================== public ===========================================
-
 
 uint64_t _demodulate_light(uint8_t *sample_buffer) {  // bad input variable name!!
     // TODO: rename sample_buffer
@@ -555,7 +552,7 @@ uint32_t _lfsr_index_search(_lfsr_checkpoint_t *checkpoint, uint8_t index, uint3
     if (success) {
         return count_final;
     } else {
-        return 0;
+        return LH2_LFSR_SEARCH_ERROR_INDICATOR;
     }
 }
 
