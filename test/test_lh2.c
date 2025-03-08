@@ -34,20 +34,36 @@
 // We provide a fake one.
 _lfsr_checkpoint_t checkpoint = { 0 };
 
-//=========================== prototypes =======================================
+//=========================== functions =======================================
 
 /**
- * @brief Test a handful of hand-picked lfsr 17-bit checkpoints generated in python, for polynomial 0
+ * @brief Test a handful of hand-picked lfsr 17-bit checkpoints generated in python
  *
- * @param[in] poly:     17-bit polynomial, from [0, 31]
+ * @param[in] poly:     17-bit polynomial index, from [0, 31]
  */
-void test_lfsr_search_handpicked_generic(uint8_t poly);
+void test_lfsr_search_handpicked_generic(uint8_t poly) {
+
+    // test every hand picked checkpoint
+    for (size_t i = 0; i < NUM_LSFR_TEST_VECTORS; i++) {
+        // Perform the LFSR search
+        uint32_t lfsr_result = _lfsr_index_search(&checkpoint, poly, test_lfsr_vector_table[poly][i]);
+        // Compare the result of the index search to the known result in the test array
+        TEST_ASSERT_EQUAL(test_lfsr_index_table[i], lfsr_result);
+    }
+}
+
+void test_lfsr_search_should_be_FFFFFFFF_when_input_0(void) {
+        // test that inputing 0, causes an error
+        uint32_t lfsr_result = _lfsr_index_search(&checkpoint, 0, 0x00000000);
+        TEST_ASSERT_EQUAL(LH2_LFSR_SEARCH_ERROR_INDICATOR, lfsr_result);
+    }
+
 
 //=========================== tests ===========================================
 
 // LFSR HANDPICKED CHECKPOINT TESTS
 // Generate all 32 from the template macro
-REPEAT_32(GENERATE_HANDPICKED_TEST) 
+REPEAT_32(GENERATE_HANDPICKED_TEST);
 
 
 //=========================== main ===========================================
@@ -55,7 +71,9 @@ REPEAT_32(GENERATE_HANDPICKED_TEST)
 int main(void) {
     UNITY_BEGIN();
     // Register LFSR handpicked checkpoint test, using a template MACRO
-    REPEAT_32(REGISTER_HANDPICKED_TEST) 
+    REPEAT_32(REGISTER_HANDPICKED_TEST);
+    RUN_TEST(test_lfsr_search_should_be_FFFFFFFF_when_input_0);
+    // Test non
     return UNITY_END();
 }
 
@@ -69,13 +87,3 @@ void tearDown(void) {
     // clean stuff up here
 }
 
-void test_lfsr_search_handpicked_generic(uint8_t poly) {
-
-    // test every hand picked checkpoint
-    for (size_t i = 0; i < NUM_LSFR_TEST_VECTORS; i++) {
-        // Perform the LFSR search
-        uint32_t lfsr_result = _lfsr_index_search(&checkpoint, poly, test_lfsr_vector_table[poly][i]);
-        // Compare the result of the index search to the known result in the test array
-        TEST_ASSERT_EQUAL(test_lfsr_index_table[i], lfsr_result);
-    }
-}
