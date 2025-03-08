@@ -19,6 +19,9 @@
 
 //=========================== defines ==========================================
 
+#define LH2_POLYNOMIAL_ERROR_INDICATOR  0xFF        ///< indicate the polynomial index is invalid
+#define LH2_LFSR_SEARCH_ERROR_INDICATOR 0xFFFFFFFF  ///< indicate the polynomial index is invalid
+
 // Dynamic checkpoints for the lsfr index search
 typedef struct {
     uint32_t bits[LH2_POLYNOMIAL_COUNT][LH2_SWEEP_COUNT];   ///< lfsr pseudo-random bits of the checkpoints
@@ -73,6 +76,5 @@ uint64_t _hamming_weight(uint64_t bits_in);
  * @return count: location of the sequence
  */
 uint32_t _lfsr_index_search(_lfsr_checkpoint_t *checkpoints, uint8_t index, uint32_t bits);
-
 
 #endif /* __LH2_DECODER_H_ */

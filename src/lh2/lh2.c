@@ -314,7 +314,7 @@ void db_lh2_process_location(db_lh2_t *lh2) {
     gpio_put(3, 0);
 
     // Check that the count didn't fall on an illegal value
-    if (temp_lfsr_loc != 0) {
+    if (temp_lfsr_loc != LH2_LFSR_SEARCH_ERROR_INDICATOR) {
         // Save a new dynamic checkpoint
         _update_lfsr_checkpoints(sensor, temp_selected_polynomial, temp_lfsr_bits, temp_lfsr_loc, sweep);
     } else {
