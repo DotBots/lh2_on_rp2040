@@ -249,6 +249,7 @@ void db_lh2_stop(void) {
 void db_lh2_process_location(db_lh2_t *lh2) {
     uint8_t sensor = lh2->sensor;  // Make a local copy of the sensor number, for readability's sake
 
+    // There is no TS4231 data to process, return early.
     if (_lh2_vars[sensor].data.count == 0) {
         return;
     }
@@ -268,13 +269,13 @@ void db_lh2_process_location(db_lh2_t *lh2) {
     if (!_get_from_ts4231_ring_buffer(&_lh2_vars[sensor].data, temp_spi_bits, &temp_timestamp)) {
         return;
     }
-    // perform the demodulation + poly search on the received packets
+    // perform the demodulation received packets
     // convert the SPI reading to bits via zero-crossing counter demodulation and differential/biphasic manchester decoding.
     gpio_put(1, 1);
     uint64_t temp_bits_sweep = _demodulate_light(temp_spi_bits);
     gpio_put(1, 0);
 
-    // figure out which polynomial each one of the two samples come from.
+    // figure out which polynomial the data belongs  to
     int8_t temp_bit_offset = 0;  // default offset
     gpio_put(2, 1);
     uint8_t temp_selected_polynomial = _determine_polynomial(temp_bits_sweep, &temp_bit_offset);
@@ -285,11 +286,10 @@ void db_lh2_process_location(db_lh2_t *lh2) {
         return;
     }
 
-    // Figure in which of the two sweep slots we should save the new data.
+    // Figure out in which of the two sweep slots we should save the new data.
     uint8_t sweep = _select_sweep(lh2, temp_selected_polynomial, temp_timestamp);
 
-    // Put the newly read polynomials in the data structure (polynomial 0,1 must map to LH0, 2,3 to LH1. This can be accomplish by  integer-dividing the selected poly in 2, a shift >> accomplishes this.)
-    // This structure always holds the two most recent sweeps from any lighthouse
+    // Compute which basestation the sweep came from (polynomial 0,1 must map to LH0, 2,3 to LH1, etc... This can be accomplish by  integer-dividing the selected poly in 2, a shift >> accomplishes this.)
     uint8_t basestation = temp_selected_polynomial >> 1;
 
     //*********************************************************************************//
