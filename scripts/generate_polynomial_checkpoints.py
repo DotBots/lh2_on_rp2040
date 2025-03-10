@@ -15,7 +15,7 @@ def create_offset_matrix(lfsr_sequence, indices, hash_bits):
     for idx,checkpoint in enumerate(indices):
 
         # If this is the first checkpoint, enforce only positive offsets
-        if checkpoint == 1:
+        if checkpoint == 0:
             offset_bot = 0
             offset_top = 2*max_offset
         else:
@@ -26,8 +26,8 @@ def create_offset_matrix(lfsr_sequence, indices, hash_bits):
         for offset in range(offset_bot, offset_top):
 
             # extract current lfsr section
-            start = checkpoint -1  + offset
-            stop = checkpoint + 16 + offset
+            start = checkpoint     + offset
+            stop = checkpoint + 17 + offset
             lfsr_chunk = lfsr_sequence[start:stop]
 
             # compute hash
@@ -80,6 +80,7 @@ def find_min_offsets(offset_matrix, indices, hash_bits):
 
         # Stop if you hit a miracle
         if best_kpi <= 40: break
+        # if best_kpi <= 40: break
 
         # Stop after too many iterations
         if print_n > 100000 * 200: break # This should give 200 prints, or 20M iterations
