@@ -460,7 +460,7 @@ uint32_t _lfsr_index_search(_lfsr_checkpoint_t *checkpoint, uint8_t index, uint3
 
     uint32_t count_down  = 0;
     uint32_t count_up    = 0;
-    uint32_t count_final = 0;
+    int32_t  count_final = 0;  // There is a chance for overflow near the roll-over point of the lfsr sequence (sequence very high (>120k), hitting a very low check point (~20))
     uint32_t b17         = 0;
     uint32_t b1          = 0;
     uint32_t masked_buff = 0;
@@ -487,8 +487,7 @@ uint32_t _lfsr_index_search(_lfsr_checkpoint_t *checkpoint, uint8_t index, uint3
         // Check lfsr backward count against precomputed checkpoints
         hash_down = (buffer_down >> 11) & HASH_TABLE_MASK;
         if (buffer_down == _lfsr_hash_table_local[hash_down]) {
-            count_down  = count_down + _lfsr_index_table_local[hash_down];
-            count_final = count_down;
+            count_final = count_down + _lfsr_index_table_local[hash_down];
             success     = true;  // mark the success of the search
             break;
         }
@@ -496,8 +495,7 @@ uint32_t _lfsr_index_search(_lfsr_checkpoint_t *checkpoint, uint8_t index, uint3
         // Check lfsr forward count against precomputed checkpoints
         hash_up = (buffer_up >> 11) & HASH_TABLE_MASK;
         if (buffer_up == _lfsr_hash_table_local[hash_up]) {
-            count_up    = _lfsr_index_table_local[hash_up] - count_up;
-            count_final = count_up;
+            count_final = _lfsr_index_table_local[hash_up] - count_up;
             success     = true;  // mark the success of the search
             break;
         }
@@ -505,15 +503,13 @@ uint32_t _lfsr_index_search(_lfsr_checkpoint_t *checkpoint, uint8_t index, uint3
         // Check the dynamical checkpoints, backward
         // Sweep 0
         if (buffer_down == checkpoint->bits[index][0]) {
-            count_down  = count_down + checkpoint->count[index][0];
-            count_final = count_down;
+            count_final = count_down + checkpoint->count[index][0];
             success     = true;  // mark the success of the search
             break;
         }
         // Sweep 1
         if (buffer_down == checkpoint->bits[index][1]) {
-            count_down  = count_down + checkpoint->count[index][1];
-            count_final = count_down;
+            count_final = count_down + checkpoint->count[index][1];
             success     = true;  // mark the success of the search
             break;
         }
@@ -521,15 +517,13 @@ uint32_t _lfsr_index_search(_lfsr_checkpoint_t *checkpoint, uint8_t index, uint3
         // Check the dynamical checkpoints, forward
         // Sweep 0
         if (buffer_up == checkpoint->bits[index][0]) {
-            count_up    = checkpoint->count[index][0] - count_up;
-            count_final = count_up;
+            count_final = checkpoint->count[index][0] - count_up;
             success     = true;  // mark the success of the search
             break;
         }
         // Sweep 1
         if (buffer_up == checkpoint->bits[index][1]) {
-            count_up    = checkpoint->count[index][1] - count_up;
-            count_final = count_up;
+            count_final = checkpoint->count[index][1] - count_up;
             success     = true;  // mark the success of the search
             break;
         }
@@ -553,7 +547,13 @@ uint32_t _lfsr_index_search(_lfsr_checkpoint_t *checkpoint, uint8_t index, uint3
 
     // Return the found lfsr value
     if (success) {
-        return count_final;
+        // Handle overflows
+        if (count_final < 0) {
+            // wrap around the number
+            count_final += 131071;  // 2^17 -1 (the full lenght of the sequence)
+        }
+        // Turn result back to unsigned before returning
+        return (uint32_t)count_final;
     } else {
         return LH2_LFSR_SEARCH_ERROR_INDICATOR;
     }
