@@ -27,6 +27,9 @@
 #define HASH_TABLE_BITS                        6                             ///< How many bits will be used for the hashtable for the _end_buffers
 #define HASH_TABLE_MASK                        ((1 << HASH_TABLE_BITS) - 1)  ///< Mask selecting the HAS_TABLE_BITS least significant bits
 
+// Define variables useful for debuging
+typedef uint32_t lfsr_17bits_t;
+
 //=========================== variables ========================================
 
 //=========================== prototypes =======================================
@@ -451,9 +454,9 @@ uint64_t _hamming_weight(uint64_t bits_in) {  // TODO: bad name for function? or
 
 uint32_t _lfsr_index_search(_lfsr_checkpoint_t *checkpoint, uint8_t index, uint32_t bits) {
 
-    bits                 = bits & 0x0001FFFF;  // initialize buffer to initial bits, masked
-    uint32_t buffer_down = bits;
-    uint32_t buffer_up   = bits;
+    lfsr_17bits_t bits_local  = bits & 0x0001FFFF;  // initialize buffer to initial bits, masked
+    lfsr_17bits_t buffer_down = bits_local;
+    lfsr_17bits_t buffer_up   = bits_local;
 
     uint32_t count_down  = 0;
     uint32_t count_up    = 0;
