@@ -1,3 +1,8 @@
+# GDB Pretty printer for the _lfsr_index_search() function.
+# It prints the lfsr sequence in nice 17bits format, and also uses python to search the position of the current sequence and prints it as well.
+#
+#
+
 import numpy as np
 import gdb.printing
 
@@ -11,6 +16,7 @@ class Bits17Print:
         # Find the current position in the LFSR sequence
         lfsr = int(self.val)
         lfsr_int = find_lfsr_sequence(lfsr, index)
+        # Print it nicely
         return f"0b{format(lfsr,'017b')} <> poly: {index} <> seq: {lfsr_int}"
     
 
@@ -74,4 +80,4 @@ def find_lfsr_sequence(lfsr, num_poly):
     return result
 
 
-# gdb.printing.register_pretty_printer(gdb.current_objfile(), lookup_function, replace=True)
+gdb.printing.register_pretty_printer(gdb.current_objfile(), lookup_function, replace=True)

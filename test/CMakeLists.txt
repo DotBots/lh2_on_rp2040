@@ -11,14 +11,26 @@ enable_testing()
 add_library(Unity STATIC unity/unity.c)
 target_include_directories(Unity PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/unity)
 
-# Create the test executable
-add_executable(test_lh2 
-        test_lh2.c
-        ${CMAKE_CURRENT_SOURCE_DIR}/../src/lh2/lh2_decoder.c)
-target_link_libraries(test_lh2 Unity)
-target_include_directories(test_lh2 PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../src/lh2)
 
-add_test(NAME TestLH2 COMMAND test_lh2)
+# Create the test executables LFSR Index Search
+add_executable(test_lh2_lfsr_index_search 
+        test_lh2_lfsr_index_search.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src/lh2/lh2_decoder.c)
+target_link_libraries(test_lh2_lfsr_index_search Unity)
+target_include_directories(test_lh2_lfsr_index_search PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../src/lh2)
+
+# Create the test executables LFSR Determine Polynomial
+# add_executable(test_lh2_determine_polynomial 
+#         test_lh2_determine_polynomial.c
+#         ${CMAKE_CURRENT_SOURCE_DIR}/../src/lh2/lh2_decoder.c)
+# target_link_libraries(test_lh2_determine_polynomial Unity)
+# target_include_directories(test_lh2_determine_polynomial PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../src/lh2)
+
+
+# Add Tests
+add_test(NAME TestLH2_LFSR_search COMMAND test_lh2_lfsr_index_search)
+# add_test(NAME TestLH2_Determine_Poly COMMAND test_lh2_determine_polynomial)
+
 
 add_compile_options(-Wall
         -Wno-format          # int != int32_t as far as the compiler is concerned because gcc has int32_t as long int
