@@ -26,9 +26,9 @@ typedef uint64_t absolute_time_t;
 
 //=========================== defines ==========================================
 
-#define LH2_BASESTATION_COUNT 16                         ///< Number of supported concurrent basestations
-#define LH2_POLYNOMIAL_COUNT  LH2_BASESTATION_COUNT * 2  ///< Number of supported LFSR polynomials, two per basestation
-#define LH2_SWEEP_COUNT       2                          ///< Number of laser sweeps per basestations rotation
+#define LH2_BASESTATION_COUNT          16                         ///< Number of supported concurrent basestations
+#define LH2_POLYNOMIAL_COUNT           LH2_BASESTATION_COUNT * 2  ///< Number of supported LFSR polynomials, two per basestation
+#define LH2_SWEEP_COUNT                2                          ///< Number of laser sweeps per basestations rotation
 
 /// LH2 data ready buffer state
 typedef enum {

@@ -21,6 +21,9 @@
 
 #define LH2_POLYNOMIAL_ERROR_INDICATOR  0xFF        ///< indicate the polynomial index is invalid
 #define LH2_LFSR_SEARCH_ERROR_INDICATOR 0xFFFFFFFF  ///< indicate the polynomial index is invalid
+// Un-comment the following line if you want to enable the Anti-Mocap fiter		
+#define LH2_MOCAP_FILTER 1   ///< Defined when the LH2 needs to coexits with a Qualysis Mocap system. It enables harsher anti-outlier filters
+
 
 // Dynamic checkpoints for the lsfr index search
 typedef struct {

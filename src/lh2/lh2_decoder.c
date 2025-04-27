@@ -22,11 +22,11 @@
 
 //=========================== defines =========================================
 
-#define FUZZY_CHIP                             0xFF                          ///< not sure what this is about
-#define POLYNOMIAL_BIT_ERROR_INITIAL_THRESHOLD 0                             ///< tolerate no errors in received data
+#define FUZZY_CHIP                             0xFF  ///< not sure what this is about
+#define POLYNOMIAL_BIT_ERROR_INITIAL_THRESHOLD 0     ///< tolerate no errors in received data
 // #define POLYNOMIAL_BIT_ERROR_INITIAL_THRESHOLD 4                             ///< initial threshold of polynomial error
-#define HASH_TABLE_BITS                        6                             ///< How many bits will be used for the hashtable for the _end_buffers
-#define HASH_TABLE_MASK                        ((1 << HASH_TABLE_BITS) - 1)  ///< Mask selecting the HAS_TABLE_BITS least significant bits
+#define HASH_TABLE_BITS 6                             ///< How many bits will be used for the hashtable for the _end_buffers
+#define HASH_TABLE_MASK ((1 << HASH_TABLE_BITS) - 1)  ///< Mask selecting the HAS_TABLE_BITS least significant bits
 
 // Define variables useful for debuging
 typedef uint32_t lfsr_17bits_t;
@@ -82,6 +82,16 @@ uint64_t _hamming_weight(uint64_t bits_in);
  * @return count: location of the sequence
  */
 uint32_t _lfsr_index_search(_lfsr_checkpoint_t *checkpoint, uint8_t index, uint32_t bits);
+
+/**
+ * @brief checks an SPI capture for signs of Qualysis Mocap pulses interference.
+ *        returns true if interference is found, returns false otherwise
+ *
+ * @param[in] arr: pointer to the array with the SPI capture to check
+ * @param[in] size: size of the buffer array to check
+ * @return True if interference is found, False otherwise
+ */
+bool _check_mocap_interference(uint8_t *arr, uint8_t size);
 
 //=========================== public ===========================================
 
@@ -375,20 +385,26 @@ uint8_t _determine_polynomial(uint64_t chipsH1, int8_t *start_val) {
     // TODO: rename chipsH1 to something relevant... like bits?
 
     // Handle the edgecase of a full zero input
-    if (chipsH1 == 0x00) {return LH2_POLYNOMIAL_ERROR_INDICATOR;}
-
+    if (chipsH1 == 0x00) {
+        return LH2_POLYNOMIAL_ERROR_INDICATOR;
+    }
 
     *start_val = 8;  // TODO: remove this? possible that I modify start value during the demodulation process
 
     int32_t  bits_N_for_comp                      = 47 - *start_val;
     uint32_t bit_buffer1                          = (uint32_t)(((0xFFFF800000000000) & chipsH1) >> 47);
     uint64_t bits_from_poly[LH2_POLYNOMIAL_COUNT] = { 0 };
-    uint8_t weights[LH2_POLYNOMIAL_COUNT]        = { 0xFF };
+    uint8_t  weights[LH2_POLYNOMIAL_COUNT]        = { 0xFF };
     uint8_t  selected_poly                        = LH2_POLYNOMIAL_ERROR_INDICATOR;  // initialize to error condition
     uint8_t  min_weight_idx                       = LH2_POLYNOMIAL_ERROR_INDICATOR;
     uint64_t min_weight                           = LH2_POLYNOMIAL_ERROR_INDICATOR;
     uint64_t bits_to_compare                      = 0;
     int32_t  threshold                            = POLYNOMIAL_BIT_ERROR_INITIAL_THRESHOLD;
+
+#if defined(LH2_MOCAP_FILTER)
+    // tighten threshold if we expect MoCap interference
+    threshold = 0;
+#endif
 
     // try polynomial vs. first buffer bits
     // this search takes 17-bit sequences and runs them forwards through the polynomial LFSRs.
@@ -409,7 +425,7 @@ uint8_t _determine_polynomial(uint64_t chipsH1, int8_t *start_val) {
         // Check against all the known polynomials
         for (uint8_t i = 0; i < LH2_POLYNOMIAL_COUNT; i++) {
             bits_from_poly[i] = (((_poly_check(_polynomials[i], bit_buffer1, bits_N_for_comp)) << (64 - 17 - (*start_val) - bits_N_for_comp)) | (chipsH1 & (0xFFFFFFFFFFFFFFFF << (64 - (*start_val)))));
-            weights[i] = __builtin_popcount(bits_from_poly[i] ^ bits_to_compare);
+            weights[i]        = __builtin_popcount(bits_from_poly[i] ^ bits_to_compare);
             // Keep track of the minimum weight value and which polinimial generated it.
             if (weights[i] < min_weight) {
                 min_weight_idx = i;
@@ -563,6 +579,25 @@ uint32_t _lfsr_index_search(_lfsr_checkpoint_t *checkpoint, uint8_t index, uint3
     }
 }
 
+bool _check_mocap_interference(uint8_t *arr, uint8_t size) {
+
+    // Qualysis Mocap cameras pulse IR light modulated with a regular square wave at 1Mhz.
+    // At the 32Mhz speed we sample the SPI, that corresponds to an alternating 0xFF,0xFF,0xFF,0x00,0x00,0x00 pattern
+
+    // Check only the bottom half of the array, that should be enough to catch an error.
+    for (int i = 0; i < size / 2; i++) {
+        // Check for 3 consecutive 0xFF
+        if (arr[i] == 0xFF && arr[i + 1] == 0xFF && arr[i + 2] == 0xFF) {
+            return true;  // Error for 3 consecutive 0xFF
+        }
+
+        // Check for 3 consecutive 0x00
+        if (arr[i] == 0x00 && arr[i + 1] == 0x00 && arr[i + 2] == 0x00) {
+            return true;  // Error for 3 consecutive 0x00
+        }
+    }
+    return false;  // No error found
+}
 //=========================== private ==========================================
 
 //=========================== interrupts =======================================
