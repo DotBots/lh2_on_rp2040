@@ -1,7 +1,8 @@
-source ../debug/lfsr_search_pp.py
+source ../debug/determine_polynomial_pp.py
 
-display bits_local
-display count_down
-display buffer_down
-display count_up
-display buffer_up
+display length_mask
+display sequence
+display selected_polynomial
+display i
+display temp_bit_offset
+display length

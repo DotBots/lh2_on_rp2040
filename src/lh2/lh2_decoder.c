@@ -23,7 +23,8 @@
 //=========================== defines =========================================
 
 #define FUZZY_CHIP                             0xFF                          ///< not sure what this is about
-#define POLYNOMIAL_BIT_ERROR_INITIAL_THRESHOLD 4                             ///< initial threshold of polynomial error
+#define POLYNOMIAL_BIT_ERROR_INITIAL_THRESHOLD 0                             ///< tolerate no errors in received data
+// #define POLYNOMIAL_BIT_ERROR_INITIAL_THRESHOLD 4                             ///< initial threshold of polynomial error
 #define HASH_TABLE_BITS                        6                             ///< How many bits will be used for the hashtable for the _end_buffers
 #define HASH_TABLE_MASK                        ((1 << HASH_TABLE_BITS) - 1)  ///< Mask selecting the HAS_TABLE_BITS least significant bits
 
@@ -373,12 +374,16 @@ uint8_t _determine_polynomial(uint64_t chipsH1, int8_t *start_val) {
     // TODO: make function a void and modify memory directly
     // TODO: rename chipsH1 to something relevant... like bits?
 
+    // Handle the edgecase of a full zero input
+    if (chipsH1 == 0x00) {return LH2_POLYNOMIAL_ERROR_INDICATOR;}
+
+
     *start_val = 8;  // TODO: remove this? possible that I modify start value during the demodulation process
 
     int32_t  bits_N_for_comp                      = 47 - *start_val;
     uint32_t bit_buffer1                          = (uint32_t)(((0xFFFF800000000000) & chipsH1) >> 47);
     uint64_t bits_from_poly[LH2_POLYNOMIAL_COUNT] = { 0 };
-    uint64_t weights[LH2_POLYNOMIAL_COUNT]        = { 0xFFFFFFFFFFFFFFFF };
+    uint8_t weights[LH2_POLYNOMIAL_COUNT]        = { 0xFF };
     uint8_t  selected_poly                        = LH2_POLYNOMIAL_ERROR_INDICATOR;  // initialize to error condition
     uint8_t  min_weight_idx                       = LH2_POLYNOMIAL_ERROR_INDICATOR;
     uint64_t min_weight                           = LH2_POLYNOMIAL_ERROR_INDICATOR;
@@ -404,7 +409,6 @@ uint8_t _determine_polynomial(uint64_t chipsH1, int8_t *start_val) {
         // Check against all the known polynomials
         for (uint8_t i = 0; i < LH2_POLYNOMIAL_COUNT; i++) {
             bits_from_poly[i] = (((_poly_check(_polynomials[i], bit_buffer1, bits_N_for_comp)) << (64 - 17 - (*start_val) - bits_N_for_comp)) | (chipsH1 & (0xFFFFFFFFFFFFFFFF << (64 - (*start_val)))));
-            // weights[i]        = _hamming_weight(bits_from_poly[i] ^ bits_to_compare);
             weights[i] = __builtin_popcount(bits_from_poly[i] ^ bits_to_compare);
             // Keep track of the minimum weight value and which polinimial generated it.
             if (weights[i] < min_weight) {

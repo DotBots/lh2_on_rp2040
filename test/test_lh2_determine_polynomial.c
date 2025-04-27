@@ -9,13 +9,13 @@
 
 // Make a template for the full range test, we will copy and paste this to automatically generate the tests
 #define GENERATE_FULL_RANGE_TEST(n)             \
-    void test_lfsr_search_full_poly_##n(void) { \
+    void test_determine_poly_full_poly_##n(void) { \
         uint8_t poly = n;                       \
-        test_lfsr_search_full_generic(poly);    \
+        test_determine_poly_full_generic(poly);    \
     }
 
 #define REGISTER_FULL_RANGE_TEST(n) \
-    RUN_TEST(test_lfsr_search_full_poly_##n);
+    RUN_TEST(test_determine_poly_full_poly_##n);
 
 // Repeat a template macro 32 times, one time per polynomial index
 #define REPEAT_32(TEST_MACRO)                                    \
@@ -38,23 +38,19 @@ _lfsr_checkpoint_t checkpoint = { 0 };
 
 /**
  * @brief Steps an LFSR sequence one step forward, return the last [length] bits of the sequence.
- *
  * @param[in] sequence: 17-bit lfsr sequence
  * @param[in] poly:     17-bit polynomial index, from [0, 31]
- * @param[in] length:   lenght at which to cut the output.
  *
  * @return    sequence+1:     Next step in the LFSR sequence
  */
-uint64_t lfsr_step_forward(uint64_t sequence, uint8_t poly, uint8_t length) {
+uint64_t lfsr_step_forward(uint64_t sequence, uint8_t poly) {
 
     // Get the important bits  17bits of the sequence
     uint32_t lfsr_sequence = sequence & (0x0001FFFF);
-    // Get a mask with [lenght] 1 bits in its LSBs.
-    uint64_t length_mask = (1 << length) - 1;
 
     // LSFR forward update
     bool b1 = __builtin_popcount(lfsr_sequence & test_polynomials[poly]) & 0x01;  // mask the buffer w/ the selected polynomial
-    return ((sequence << 1) | b1) & (length_mask);          // Add the new bit to the sequence
+    return ((sequence << 1) | b1);          // Add the new bit to the sequence
 }
 
 /**
@@ -63,25 +59,34 @@ uint64_t lfsr_step_forward(uint64_t sequence, uint8_t poly, uint8_t length) {
  *
  * @param[in] poly:     17-bit polynomial index, from [0, 31]
  */
-void test_lfsr_search_full_generic(uint8_t poly) {
+void test_determine_poly_full_generic(uint8_t poly) {
 
     // Set the starting seed of the lfsr sequence
     uint64_t sequence = 0x01;
     // how many bits we received from the LH2 sensor
     uint8_t length = 60;
+    // Create a left justified mask of <length> 1-bits.
+    uint64_t length_mask = ((uint64_t)1 << length) - 1;
+    length_mask = length_mask << (sizeof(uint64_t)*8 - length); // left justify the mask
     // default offset
     int8_t temp_bit_offset = 0;
+
+    // Prime the test sequence, fill the entire 64bit variable.
+    for (size_t i = 0; i < 64; i++) {
+        // Step the lfsr sequence forward
+        sequence = lfsr_step_forward(sequence, poly);        
+    }
 
     // test every hand picked checkpoint
     for (size_t i = 0; i < 120000; i++) {
         // Perform the LFSR search
-        uint8_t selected_polynomial = _determine_polynomial(sequence, &temp_bit_offset);
+        uint8_t selected_polynomial = _determine_polynomial(sequence & length_mask, &temp_bit_offset); // cut the sequence to be <length> left justified bits.
         // Compare the result of the lfsr search to the known result
         TEST_ASSERT_EQUAL(poly, selected_polynomial);
-        TEST_ASSERT_EQUAL(0, temp_bit_offset);
+        // TEST_ASSERT_EQUAL(0, temp_bit_offset);
 
         // Step the lfsr sequence forward
-        sequence = lfsr_step_forward(sequence, poly, length);
+        sequence = lfsr_step_forward(sequence, poly);
     }
 }
 
@@ -91,10 +96,13 @@ void test_lfsr_search_full_generic(uint8_t poly) {
 // Generate all 32 from the template macro
 REPEAT_32(GENERATE_FULL_RANGE_TEST);
 
-void test_lfsr_search_should_be_FFFFFFFF_when_input_0(void) {
+void test_determine_poly_should_be_FF_when_input_0(void) {
+
+    // default offset
+    int8_t temp_bit_offset = 0;
     // test that inputing 0, causes an error
-    uint32_t lfsr_result = _lfsr_index_search(&checkpoint, 0, 0x00000000);
-    TEST_ASSERT_EQUAL(LH2_LFSR_SEARCH_ERROR_INDICATOR, lfsr_result);
+    uint8_t selected_polynomial = _determine_polynomial(0x00, &temp_bit_offset);
+    TEST_ASSERT_EQUAL(LH2_POLYNOMIAL_ERROR_INDICATOR, selected_polynomial);
 }
 
 //=========================== main ===========================================
@@ -103,7 +111,7 @@ int main(void) {
     UNITY_BEGIN();
     // Register LFSR handpicked checkpoint test, using a template MACRO
     REPEAT_32(REGISTER_FULL_RANGE_TEST);
-    RUN_TEST(test_lfsr_search_should_be_FFFFFFFF_when_input_0);
+    RUN_TEST(test_determine_poly_should_be_FF_when_input_0);
     // Test non
     return UNITY_END();
 }

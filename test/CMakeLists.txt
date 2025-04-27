@@ -20,16 +20,16 @@ target_link_libraries(test_lh2_lfsr_index_search Unity)
 target_include_directories(test_lh2_lfsr_index_search PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../src/lh2)
 
 # Create the test executables LFSR Determine Polynomial
-# add_executable(test_lh2_determine_polynomial 
-#         test_lh2_determine_polynomial.c
-#         ${CMAKE_CURRENT_SOURCE_DIR}/../src/lh2/lh2_decoder.c)
-# target_link_libraries(test_lh2_determine_polynomial Unity)
-# target_include_directories(test_lh2_determine_polynomial PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../src/lh2)
+add_executable(test_lh2_determine_polynomial 
+        test_lh2_determine_polynomial.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src/lh2/lh2_decoder.c)
+target_link_libraries(test_lh2_determine_polynomial Unity)
+target_include_directories(test_lh2_determine_polynomial PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../src/lh2)
 
 
 # Add Tests
 add_test(NAME TestLH2_LFSR_search COMMAND test_lh2_lfsr_index_search)
-# add_test(NAME TestLH2_Determine_Poly COMMAND test_lh2_determine_polynomial)
+add_test(NAME TestLH2_Determine_Poly COMMAND test_lh2_determine_polynomial)
 
 
 add_compile_options(-Wall
