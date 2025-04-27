@@ -1,5 +1,12 @@
 #ignore Build folder
 build/
+build_test/
+.vscode/
+
+# Python Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
 
 # Prerequisites
 *.d

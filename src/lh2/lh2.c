@@ -19,6 +19,7 @@
 #include "ts4231_capture.pio.h"
 #include "hardware/gpio.h"
 #include "lh2.h"
+#include "lh2_decoder.h"
 #include "lh2_checkpoints.h"
 #include "pico/time.h"
 #include "hardware/dma.h"
@@ -28,22 +29,12 @@
 
 #define TS4231_SENSOR_QTY                      4                                                              ///< Max amount of TS4231 sensors the library supports
 #define TS4231_CAPTURE_BUFFER_SIZE             64                                                             ///< Size of buffers used for SPI communications
-#define FUZZY_CHIP                             0xFF                                                           ///< not sure what this is about
 #define LH2_LOCATION_ERROR_INDICATOR           0xFFFFFFFF                                                     ///< indicate the location value is false
 #define LH2_POLYNOMIAL_ERROR_INDICATOR         0xFF                                                           ///< indicate the polynomial index is invalid
-#define POLYNOMIAL_BIT_ERROR_INITIAL_THRESHOLD 4                                                              ///< initial threshold of polynomial error
 #define LH2_BUFFER_SIZE                        10                                                             ///< Amount of lh2 frames the buffer can contain
-#define HASH_TABLE_BITS                        11                                                             ///< How many bits will be used for the hashtable for the _end_buffers
-#define HASH_TABLE_SIZE                        (1 << HASH_TABLE_BITS)                                         ///< How big will the hashtable for the _end_buffers
-#define HASH_TABLE_MASK                        ((1 << HASH_TABLE_BITS) - 1)                                   ///< Mask selecting the HAS_TABLE_BITS least significant bits
-#define DISTANCE_BETWEEN_LSFR_CHECKPOINTS      2048                                                           ///< How many lsfr checkpoints are per polynomial
-#define CHECKPOINT_TABLE_BITS                  6                                                              ///< How many bits will be used for the checkpoint table for the lfsr search
-#define CHECKPOINT_TABLE_MASK_LOW              ((1 << CHECKPOINT_TABLE_BITS) - 1)                             ///< How big will the checkpoint table for the lfsr search
-#define CHECKPOINT_TABLE_MASK_HIGH             (((1 << CHECKPOINT_TABLE_BITS) - 1) << CHECKPOINT_TABLE_BITS)  ///< Mask selecting the CHECKPOINT_TABLE_BITS least significant bits
 #define LH2_MAX_DATA_VALID_TIME_US             2000000                                                        //< Data older than this is considered outdate and should be erased (in microseconds)
 #define LH2_SWEEP_PERIOD_US                    20000                                                          ///< time, in microseconds, between two full rotations of the LH2 motor
 #define LH2_SWEEP_PERIOD_THRESHOLD_US          1000                                                           ///< How close a LH2 pulse must arrive relative to LH2_SWEEP_PERIOD_US, to be considered the same type of sweep (first sweep or second second). (in microseconds)
-#define LH2_TIMER_DEV                          2                                                              ///< Timer device used for LH2
 
 // Ring buffer for the ts4231 raw data capture
 typedef struct {
@@ -53,13 +44,6 @@ typedef struct {
     uint8_t         readIndex;                                            ///< Index for next read
     uint8_t         count;                                                ///< Number of arrays in buffer
 } lh2_ring_buffer_t;
-
-// Dynamic checkpoints for the lsfr index search
-typedef struct {
-    uint32_t bits[LH2_POLYNOMIAL_COUNT][LH2_SWEEP_COUNT];   ///< lfsr pseudo-random bits of the checkpoints
-    uint32_t count[LH2_POLYNOMIAL_COUNT][LH2_SWEEP_COUNT];  ///< corresponding lfsr index of the checkpoints
-    uint32_t average;                                       ///< mid-point between the lfsr index of sweep0 and sweep1
-} _lfsr_checkpoint_t;
 
 typedef struct {
     uint8_t            spi_rx_buffer[TS4231_CAPTURE_BUFFER_SIZE];  ///< buffer where data coming from SPI are stored
@@ -76,8 +60,6 @@ typedef struct {
 } pio_vars_t;
 
 //=========================== variables ========================================
-
-static uint16_t _end_buffers_hashtable[HASH_TABLE_SIZE] = { 0 };
 
 ///< Encodes in two bits which sweep slot of a particular basestation is empty, (1 means data, 0 means empty)
 typedef enum {
@@ -110,54 +92,6 @@ void _initialize_ts4231(const uint8_t gpio_d, const uint8_t gpio_e);
 void _init_dma_pio_capture(uint8_t sensor);
 
 /**
- * @brief
- * @param[in] sample_buffer: SPI samples loaded into a local buffer
- * @return chipsH: 64-bits of demodulated data
- */
-uint64_t _demodulate_light(uint8_t *sample_buffer);
-
-/**
- * @brief from a 17-bit sequence and a polynomial, generate up to 64-17=47 bits as if the LFSR specified by poly were run forwards for numbits cycles, all little endian
- *
- * @param[in] poly:     17-bit polynomial
- * @param[in] bits:     starting seed
- * @param[in] numbits:  number of bits
- *
- * @return sequence of bits resulting from running the LFSR forward
- */
-uint64_t _poly_check(uint32_t poly, uint32_t bits, uint8_t numbits);
-
-/**
- * @brief find out which LFSR polynomial the bit sequence is a member of
- *
- * @param[in] chipsH1: input sequences of bits from demodulation
- * @param[in] start_val: number of bits between the envelope falling edge and the beginning of the sequence where valid data has been found
- *
- * @return polynomial, indicating which polynomial was found, or FF for error (polynomial not found).
- */
-uint8_t _determine_polynomial(uint64_t chipsH1, int8_t *start_val);
-
-/**
- * @brief counts the number of 1s in a 64-bit
- *
- * @param[in] bits_in: arbitrary bits
- *
- * @return cumulative number of 1s inside of bits_in
- */
-uint64_t _hamming_weight(uint64_t bits_in);
-
-/**
- * @brief finds the position of a 17-bit sequence (bits) in the sequence generated by polynomial3 with initial seed 1
- *
- * @param[in] sensor:   which TS4231 sensor is associated with this data structure (valid values [0-3])
- * @param[in] index: index of polynomial
- * @param[in] bits: 17-bit sequence
- *
- * @return count: location of the sequence
- */
-uint32_t _reverse_count_p(uint8_t sensor, uint8_t index, uint32_t bits);
-
-/**
  * @brief add one element to the ring buffer for spi captures
  *
  * @param[in]   cb          pointer to ring buffer structure
@@ -176,22 +110,16 @@ void _add_to_ts4231_ring_buffer(lh2_ring_buffer_t *cb, uint8_t *data, absolute_t
 bool _get_from_ts4231_ring_buffer(lh2_ring_buffer_t *cb, uint8_t *data, absolute_time_t *timestamp);
 
 /**
- * @brief generates a hashtable from the LSFR checpoints and stores it in an array.
- *
- * @param[in]   hash_table  pointer to the array where the hashtable will be stored
- */
-void _fill_hash_table(uint16_t *hash_table);
-
-/**
  * @brief Accesses the global tables _lfsr_checkpoint_hashtable & _lfsr_checkpoint_count
  *        and updates them with the last found polynomial count
- * 
+ *
  * @param[in] sensor:   which TS4231 sensor is associated with this data structure (valid values [0-3])
  * @param[in] polynomial: index of polynomial
  * @param[in] bits: 17-bit sequence
  * @param[in] count: position of the received laser sweep in the LSFR sequence
+ * @param[in] sweep: 0 for the first sweep, and 1 for the second sweep
  */
-void _update_lfsr_checkpoints(uint8_t sensor, uint8_t polynomial, uint32_t bits, uint32_t count);
+void _update_lfsr_checkpoints(uint8_t sensor, uint8_t polynomial, uint32_t bits, uint32_t count, uint8_t sweep);
 
 /**
  * @brief LH2 sweeps come with an almost perfect 20ms difference.
@@ -239,9 +167,6 @@ void db_lh2_init(db_lh2_t *lh2, uint8_t sensor, const uint8_t gpio_d, const uint
         }
     }
     memset(_lh2_vars[sensor].data.buffer[0], 0, LH2_BUFFER_SIZE);
-
-    // Initialize the hash table for the lsfr checkpoints
-    _fill_hash_table(_end_buffers_hashtable);
 
     // Configure the PIO and the DMA for the TS4231 capture
     // Retrieve pio and sm dinamically, and store them in the global variable.
@@ -324,6 +249,7 @@ void db_lh2_stop(void) {
 void db_lh2_process_location(db_lh2_t *lh2) {
     uint8_t sensor = lh2->sensor;  // Make a local copy of the sensor number, for readability's sake
 
+    // There is no TS4231 data to process, return early.
     if (_lh2_vars[sensor].data.count == 0) {
         return;
     }
@@ -343,13 +269,13 @@ void db_lh2_process_location(db_lh2_t *lh2) {
     if (!_get_from_ts4231_ring_buffer(&_lh2_vars[sensor].data, temp_spi_bits, &temp_timestamp)) {
         return;
     }
-    // perform the demodulation + poly search on the received packets
+    // perform the demodulation received packets
     // convert the SPI reading to bits via zero-crossing counter demodulation and differential/biphasic manchester decoding.
     gpio_put(1, 1);
     uint64_t temp_bits_sweep = _demodulate_light(temp_spi_bits);
     gpio_put(1, 0);
 
-    // figure out which polynomial each one of the two samples come from.
+    // figure out which polynomial the data belongs  to
     int8_t temp_bit_offset = 0;  // default offset
     gpio_put(2, 1);
     uint8_t temp_selected_polynomial = _determine_polynomial(temp_bits_sweep, &temp_bit_offset);
@@ -360,32 +286,45 @@ void db_lh2_process_location(db_lh2_t *lh2) {
         return;
     }
 
-    // Figure in which of the two sweep slots we should save the new data.
+    // Figure out in which of the two sweep slots we should save the new data.
     uint8_t sweep = _select_sweep(lh2, temp_selected_polynomial, temp_timestamp);
 
-    // Put the newly read polynomials in the data structure (polynomial 0,1 must map to LH0, 2,3 to LH1. This can be accomplish by  integer-dividing the selected poly in 2, a shift >> accomplishes this.)
-    // This structur always holds the two most recent sweeps from any lighthouse
+    // Compute which basestation the sweep came from (polynomial 0,1 must map to LH0, 2,3 to LH1, etc... This can be accomplish by  integer-dividing the selected poly in 2, a shift >> accomplishes this.)
     uint8_t basestation = temp_selected_polynomial >> 1;
 
     //*********************************************************************************//
-    //                           Compute Polynomial Count                              //
+    //                             Compute LFSR Position                               //
     //*********************************************************************************//
 
+    // Select the valid bits of the lfsr by applying the offset (he first few bits might be invalid, as detected by _determine_polynomial())
+    uint32_t temp_lfsr_bits = temp_bits_sweep >> (47 - temp_bit_offset);
+
     // Sanity check, make sure you don't start the LFSR search with a bit-sequence full of zeros.
-    if ((temp_bits_sweep >> (47 - temp_bit_offset)) == 0x000000) {
+    if (temp_lfsr_bits == 0x000000) {
         // Mark the data as wrong and keep going
         lh2->data_ready[sweep][basestation] = DB_LH2_NO_NEW_DATA;
         return;
     }
 
-    // Compute and save the lsfr location.
+    // Compute the lfsr location.
     gpio_put(3, 1);
-    uint32_t lfsr_loc_temp = _reverse_count_p(
-                                sensor,
-                                temp_selected_polynomial,
-                                temp_bits_sweep >> (47 - temp_bit_offset)) -
-                            temp_bit_offset;
+    uint32_t temp_lfsr_loc = _lfsr_index_search(&_lh2_vars[sensor].checkpoint,
+                                                temp_selected_polynomial,
+                                                temp_lfsr_bits);
     gpio_put(3, 0);
+
+    // Check that the count didn't fall on an illegal value
+    if (temp_lfsr_loc != LH2_LFSR_SEARCH_ERROR_INDICATOR) {
+        // Save a new dynamic checkpoint
+        _update_lfsr_checkpoints(sensor, temp_selected_polynomial, temp_lfsr_bits, temp_lfsr_loc, sweep);
+    } else {
+        // Mark the data as wrong and keep going
+        lh2->data_ready[sweep][basestation] = DB_LH2_NO_NEW_DATA;
+        return;
+    }
+
+    // Undo the bit offset introduced above, to get the LFSR position of the first bit that hit the sensor.
+    temp_lfsr_loc -= temp_bit_offset;
 
     //*********************************************************************************//
     //                                 Store results                                   //
@@ -397,7 +336,7 @@ void db_lh2_process_location(db_lh2_t *lh2) {
     lh2->raw_data[sweep][basestation].bits_sweep          = temp_bits_sweep;
     lh2->timestamps[sweep][basestation]                   = temp_timestamp;
     // Save processed location information
-    lh2->locations[sweep][basestation].lfsr_location       = lfsr_loc_temp;
+    lh2->locations[sweep][basestation].lfsr_location       = temp_lfsr_loc;
     lh2->locations[sweep][basestation].selected_polynomial = temp_selected_polynomial;
     // Mark the data point as processed
     lh2->data_ready[sweep][basestation] = DB_LH2_PROCESSED_DATA_AVAILABLE;
@@ -525,8 +464,8 @@ void _init_dma_pio_capture(uint8_t sensor) {
     uint8_t sm  = _lh2_vars[sensor].sm;
 
     // Configure PIO->Temp Buffer DMA
-    int chan = dma_claim_unused_channel(true);
-    _lh2_vars[sensor].dma_channel = chan;       // save which channel belongs to which sensor
+    int chan                      = dma_claim_unused_channel(true);
+    _lh2_vars[sensor].dma_channel = chan;  // save which channel belongs to which sensor
 
     dma_channel_config c = dma_channel_get_default_config(chan);
     channel_config_set_transfer_data_size(&c, DMA_SIZE_8);      // Transfer 32 bits at a time (max possible)
@@ -543,476 +482,6 @@ void _init_dma_pio_capture(uint8_t sensor) {
         64,                               // Transfer 1 word per data request.
         true                              // Start immediately.
     );
-}
-
-uint64_t _demodulate_light(uint8_t *sample_buffer) {  // bad input variable name!!
-    // TODO: rename sample_buffer
-    // TODO: make it a void and have chips be a modified pointer thingie
-    // FIXME: there is an edge case where I throw away an initial "1" and do not count it in the bit-shift offset, resulting in an incorrect error of 1 in the LFSR location
-    uint8_t chip_index;
-    uint8_t local_buffer[128];
-    uint8_t zccs_1[128];
-    uint8_t chips1[128];  // TODO: give this a better name.
-    uint8_t temp_byte_N;  // TODO: bad variable name "temp byte"
-    uint8_t temp_byte_M;  // TODO: bad variable name "temp byte"
-
-    // initialize loop variables
-    uint8_t  ii = 0x00;
-    int      jj = 0;
-    int      kk = 0;
-    uint64_t gg = 0;
-
-    // initialize temporary "ones counter" variable that counts consecutive ones
-    int ones_counter = 0;
-
-    // initialize result:
-    uint64_t chipsH1 = 0;
-
-    // FIND ZERO CROSSINGS
-    chip_index         = 0;
-    zccs_1[chip_index] = 0x01;
-
-    memcpy(local_buffer, sample_buffer, 128);
-
-    // for loop over bytes of the SPI buffer (jj), nested with a for loop over bits in each byte (ii)
-    for (jj = 0; jj < 128; jj++) {
-        // edge case - check if last bit (LSB) of previous byte is the same as first bit (MSB) of current byte
-        // if it is not, increment chip_index and reset count
-        if (jj != 0) {
-            temp_byte_M = (local_buffer[jj - 1]) & (0x01);   // previous byte's LSB
-            temp_byte_N = (local_buffer[jj] >> 7) & (0x01);  // current byte's MSB
-            if (temp_byte_M != temp_byte_N) {
-                chip_index++;
-                zccs_1[chip_index] = 1;
-            } else {
-                zccs_1[chip_index] += 1;
-            }
-        }
-        // look at one byte at a time
-        for (ii = 7; ii > 0; ii--) {
-            temp_byte_M = ((local_buffer[jj]) >> (ii)) & (0x01);      // bit shift by ii and mask
-            temp_byte_N = ((local_buffer[jj]) >> (ii - 1)) & (0x01);  // bit shift by ii-1 and mask
-            if (temp_byte_M == temp_byte_N) {
-                zccs_1[chip_index] += 1;
-            } else {
-                chip_index++;
-                zccs_1[chip_index] = 1;
-            }
-        }
-    }
-
-    // threshold the zero crossings into: likely one chip, likely two zero chips, or fuzzy
-    for (jj = 0; jj < 128; jj++) {
-        // not memory efficient, but ok for readability, turn ZCCS into chips by thresholding
-        if (zccs_1[jj] >= 5) {
-            chips1[jj] = 0;  // it's a very likely zero
-        } else if (zccs_1[jj] <= 3) {
-            chips1[jj] = 1;  // it's a very likely one
-        } else {
-            chips1[jj] = FUZZY_CHIP;  // fuzzy
-        }
-    }
-    // final bit is bugged, make it fuzzy:
-    // chips1[127] = 0xFF;
-
-    // DEMODULATION:
-    // basic principles, in descending order of importance:
-    //  1) an odd number of ones in a row is not allowed - this must be avoided at all costs
-    //  2) finding a solution to #1 given a set of data is quite cumbersome without certain assumptions
-    //    a) a fuzzy before an odd run of 1s is almost always a 1
-    //    b) a fuzzy between two even runs of 1s is almost always a 0
-    //    c) a fuzzy after an even run of 1s is usually a a 0
-    //  3) a detected 1 is rarely wrong, but detected 0s can be, this is especially common in low-SNR readings
-    //    exception: if the first bit is a 1 it is NOT reliable because the capture is asynchronous
-    //  4) this is not perfect, but the earlier the chip, the more likely that it is correct. Polynomials can be used to fix bit errors later in the reading
-    // known bugs/issues:
-    //  1) if there are many ones at the very beginning of the reading, the algorithm will mess it up
-    //  2) in some instances, the count value will be off by approximately 5, the origin of this bug is unknown at the moment
-    // DEMODULATE PACKET:
-
-    // reset variables:
-    kk           = 0;
-    ones_counter = 0;
-    jj           = 0;
-    for (jj = 0; jj < 128;) {      // TODO: 128 is such an easy magic number to get rid of...
-        gg = 0;                    // TODO: this is not used here?
-        if (chips1[jj] == 0x00) {  // zero, keep going, reset state
-            jj++;
-            ones_counter = 0;
-        }
-        if (chips1[jj] == 0x01) {  // one, keep going, keep track of the # of ones
-                                   // k_msleep(10);
-            if (jj == 0) {         // edge case - first chip = 1 is unreliable, do not increment 1s counter
-                jj++;
-            } else {
-                jj           = jj + 1;
-                ones_counter = ones_counter + 1;
-            }
-        }
-
-        if ((jj == 127) & (chips1[jj] == FUZZY_CHIP)) {
-            chips1[jj] = 0x00;
-        } else if ((chips1[jj] == FUZZY_CHIP) & (ones_counter == 0)) {  // fuzz after a zero
-                                                                        // k_msleep(10);
-            if (chips1[jj + 1] == 0) {                                  // zero then fuzz then zero -> fuzz is a zero
-                jj++;
-                chips1[jj - 1] = 0;
-            } else if (chips1[jj + 1] == FUZZY_CHIP) {  // zero then fuzz then fuzz -> just move on, you're probably screwed
-                // k_msleep(10);
-                jj += 2;
-            } else if (chips1[jj + 1] == 1) {  // zero then fuzz then one -> investigate
-                kk           = 1;
-                ones_counter = 0;
-                while (chips1[jj + kk] == 1) {
-                    ones_counter++;
-                    kk++;
-                }
-                if (ones_counter % 2 == 1) {  // fuzz -> odd ones, the fuzz is a 1
-                    jj++;
-                    chips1[jj - 1] = 1;
-                    ones_counter   = 1;
-                } else if (ones_counter % 2 == 0) {  // fuzz -> even ones, move on for now, it's indeterminate
-                    jj++;
-                    ones_counter = 0;  // temporarily treat as a 0 for counting purposes
-                } else {               // catch statement
-                    jj++;
-                }
-            }
-        } else if ((chips1[jj] == FUZZY_CHIP) & (ones_counter != 0)) {  // ones then fuzz
-                                                                        // k_msleep(10);
-            if ((ones_counter % 2 == 0) & (chips1[jj + 1] == 0)) {      // even ones then fuzz then zero, fuzz is a zero
-                jj++;
-                chips1[jj - 1] = 0;
-                ones_counter   = 0;
-            }
-            if ((ones_counter % 2 == 0) & (chips1[jj + 1] != 0)) {  // even ones then fuzz then not zero - investigate
-                if (chips1[jj + 1] == 1) {                          // subsequent bit is a 1
-                    kk = 1;
-                    while (chips1[jj + kk] == 1) {
-                        ones_counter++;
-                        kk++;
-                    }
-                    if (ones_counter % 2 == 1) {  // indicates an odd # of 1s, so the fuzzy has to be a 1
-                        jj++;
-                        chips1[jj - 1] = 1;
-                        ones_counter   = 1;              // not actually 1, but it's ok for modulo purposes
-                    } else if (ones_counter % 2 == 0) {  // even ones -> fuzz -> even ones, indeterminate
-                        jj++;
-                        ones_counter = 0;
-                    }
-                } else if (chips1[jj + 1] == FUZZY_CHIP) {  // subsequent bit is a fuzzy - skip for now...
-                    jj++;
-                }
-            } else if ((ones_counter % 2 == 1) & (chips1[jj + 1] == FUZZY_CHIP)) {  // odd ones then fuzz then fuzz, fuzz is 1 then 0
-                jj += 2;
-                chips1[jj - 1] = 0;
-                chips1[jj - 2] = 1;
-                ones_counter   = 0;
-            } else if ((ones_counter % 2 == 1) & (chips1[jj + 1] != 0)) {  // odd ones then fuzz then not zero - the fuzzy has to be a 1
-                jj++;
-                ones_counter++;
-                chips1[jj - 1] = 1;
-            } else {  // catch statement
-                jj++;
-            }
-        }
-    }
-    // finish up demodulation, pick off straggling fuzzies and odd runs of 1s
-    for (jj = 0; jj < 128;) {
-        if (chips1[jj] == 0x00) {                   // zero, keep going, reset state
-            if (ones_counter % 2 == 1) {            // implies an odd # of 1s
-                chips1[jj - ones_counter - 1] = 1;  // change the bit before the run of 1s to a 1 to make it even
-            }
-            jj++;
-            ones_counter = 0;
-        } else if (chips1[jj] == 0x01) {  // one, keep going, keep track of the # of ones
-            if (jj == 0) {                // edge case - first chip = 1 is unreliable, do not increment 1s counter
-                jj++;
-            } else {
-                jj           = jj + 1;
-                ones_counter = ones_counter + 1;
-            }
-        } else if (chips1[jj] == FUZZY_CHIP) {
-            // if (ones_counter==0) { // fuzz after zeros, if the next chip is a 1, make it a 1, else make it a zero
-            //     if (chips1[jj+1]==1) {
-            //         jj+1;
-            //         chips1[jj-1] = 1;
-            //         ones_counter++;
-            //     }
-            //     else {
-            //         jj++;
-            //     }
-            // }  <---- this is commented out because this is a VERY rare edge case and seems to be causing occasional problems w/ otherwise clean packets
-            if ((ones_counter != 0) & (ones_counter % 2 == 0)) {  // fuzz after even ones - at this point this is almost always a 0
-                jj++;
-                chips1[jj - 1] = 0;
-                ones_counter   = 0;
-            } else if (ones_counter % 2 == 1) {  // fuzz after odd ones - exceedingly uncommon at this point, make it a 1
-                jj++;
-                chips1[jj - 1] = 1;
-                ones_counter++;
-            } else {  // catch statement
-                jj++;
-            }
-        } else {  // catch statement
-            jj++;
-        }
-    }
-
-    // next step in demodulation: take the resulting array of 1 and 0 chips and put them into a single 64-bit unsigned int
-    // this is primarily for easy manipulation for polynomial searching
-    chip_index = 0;  // TODO: rename "chip index" it's not descriptive
-    chipsH1    = 0;
-    gg         = 0;    // looping/while break indicating variable, reset to 0
-    while (gg < 64) {  // very last one - make all remaining fuzzies 0 and load it into two 64-bit longs
-        if (chip_index > 127) {
-            gg = 65;  // break
-        }
-        if ((chip_index == 0) & (chips1[chip_index] == 0x01)) {  // first bit is a 1 - ignore it
-            chip_index = chip_index + 1;
-        } else if ((chip_index == 0) & (chips1[chip_index] == FUZZY_CHIP)) {  // first bit is fuzzy - ignore it
-            chip_index = chip_index + 1;
-        } else if (gg == 63) {  // load the final bit
-            if (chips1[chip_index] == 0) {
-                chipsH1 &= 0xFFFFFFFFFFFFFFFE;
-                gg         = gg + 1;
-                chip_index = chip_index + 1;
-            } else if (chips1[chip_index] == FUZZY_CHIP) {
-                chipsH1 &= 0xFFFFFFFFFFFFFFFE;
-                gg         = gg + 1;
-                chip_index = chip_index + 1;
-            } else if (chips1[chip_index] == 0x01) {
-                chipsH1 |= 0x0000000000000001;
-                gg         = gg + 1;
-                chip_index = chip_index + 2;
-            }
-        } else {  // load the bit in!!
-            if (chips1[chip_index] == 0) {
-                chipsH1 &= 0xFFFFFFFFFFFFFFFE;
-                chipsH1    = chipsH1 << 1;
-                gg         = gg + 1;
-                chip_index = chip_index + 1;
-            } else if (chips1[chip_index] == FUZZY_CHIP) {
-                chipsH1 &= 0xFFFFFFFFFFFFFFFE;
-                chipsH1    = chipsH1 << 1;
-                gg         = gg + 1;
-                chip_index = chip_index + 1;
-            } else if (chips1[chip_index] == 0x01) {
-                chipsH1 |= 0x0000000000000001;
-                chipsH1    = chipsH1 << 1;
-                gg         = gg + 1;
-                chip_index = chip_index + 2;
-            }
-        }
-    }
-    return chipsH1;
-}
-
-uint64_t _poly_check(uint32_t poly, uint32_t bits, uint8_t numbits) {
-    uint64_t bits_out      = 0;
-    uint8_t  shift_counter = 1;
-    uint8_t  b1            = 0;
-    uint32_t buffer        = bits;   // mask to prevent bit overflow
-    poly &= 0x00001FFFF;             // mask to prevent silliness
-    bits_out |= buffer;              // initialize 17 LSBs of result
-    bits_out &= 0x00000000FFFFFFFF;  // mask because I didn't want to re-cast the buffer
-
-    while (shift_counter <= numbits) {
-        bits_out = bits_out << 1;  // shift left (forward in time) by 1
-
-        b1     = __builtin_popcount(buffer & poly) & 0x01;  // mask the buffer w/ the selected polynomial
-        buffer = ((buffer << 1) | b1) & (0x0001FFFF);
-
-        bits_out |= ((b1) & (0x01));  // put result of the XOR operation into the new bit
-        shift_counter++;
-    }
-    return bits_out;
-}
-
-uint8_t _determine_polynomial(uint64_t chipsH1, int8_t *start_val) {
-    // check which polynomial the bit sequence is part of
-    // TODO: make function a void and modify memory directly
-    // TODO: rename chipsH1 to something relevant... like bits?
-
-    *start_val = 8;  // TODO: remove this? possible that I modify start value during the demodulation process
-
-    int32_t  bits_N_for_comp                      = 47 - *start_val;
-    uint32_t bit_buffer1                          = (uint32_t)(((0xFFFF800000000000) & chipsH1) >> 47);
-    uint64_t bits_from_poly[LH2_POLYNOMIAL_COUNT] = { 0 };
-    uint64_t weights[LH2_POLYNOMIAL_COUNT]        = { 0xFFFFFFFFFFFFFFFF };
-    uint8_t  selected_poly                        = LH2_POLYNOMIAL_ERROR_INDICATOR;  // initialize to error condition
-    uint8_t  min_weight_idx                       = LH2_POLYNOMIAL_ERROR_INDICATOR;
-    uint64_t min_weight                           = LH2_POLYNOMIAL_ERROR_INDICATOR;
-    uint64_t bits_to_compare                      = 0;
-    int32_t  threshold                            = POLYNOMIAL_BIT_ERROR_INITIAL_THRESHOLD;
-
-    // try polynomial vs. first buffer bits
-    // this search takes 17-bit sequences and runs them forwards through the polynomial LFSRs.
-    // if the remaining detected bits fit well with the chosen 17-bit sequence and a given polynomial, it is treated as "correct"
-    // in case of bit errors at the beginning of the capture, the 17-bit sequence is shifted (to a max of 8 bits)
-    // in case of bit errors at the end of the capture, the ending bits are removed (to a max of
-    // removing bits reduces the threshold correspondingly, as incorrect packet detection will cause a significant delay in location estimate
-
-    // run polynomial search on the first capture
-    while (1) {
-
-        // TODO: do this math stuff in multiple operations to: (a) make it readable (b) ensure order-of-execution
-        bit_buffer1     = (uint32_t)(((0xFFFF800000000000 >> (*start_val)) & chipsH1) >> (64 - 17 - (*start_val)));
-        bits_to_compare = (chipsH1 & (0xFFFFFFFFFFFFFFFF << (64 - 17 - (*start_val) - bits_N_for_comp)));
-        // reset the minimum polynomial match found
-        min_weight_idx = LH2_POLYNOMIAL_ERROR_INDICATOR;
-        min_weight     = LH2_POLYNOMIAL_ERROR_INDICATOR;
-        // Check against all the known polynomials
-        for (uint8_t i = 0; i < LH2_POLYNOMIAL_COUNT; i++) {
-            bits_from_poly[i] = (((_poly_check(_polynomials[i], bit_buffer1, bits_N_for_comp)) << (64 - 17 - (*start_val) - bits_N_for_comp)) | (chipsH1 & (0xFFFFFFFFFFFFFFFF << (64 - (*start_val)))));
-            // weights[i]        = _hamming_weight(bits_from_poly[i] ^ bits_to_compare);
-            weights[i] = __builtin_popcount(bits_from_poly[i] ^ bits_to_compare);
-            // Keep track of the minimum weight value and which polinimial generated it.
-            if (weights[i] < min_weight) {
-                min_weight_idx = i;
-                min_weight     = weights[i];
-            }
-        }
-
-        // If you found a sufficiently good value, then return which polinomial generated it
-        if (min_weight <= (uint64_t)threshold) {
-            selected_poly = min_weight_idx;
-            break;
-            // match failed, try again removing bits from the end
-        } else if (*start_val > 8) {
-            *start_val      = 8;
-            bits_N_for_comp = bits_N_for_comp - 9;
-            if (threshold > 2) {
-                threshold = threshold - 1;
-            } else if (threshold == 2) {  // keep threshold at ones, but you're probably screwed with an unlucky bit error
-                threshold = 2;
-            }
-        } else {
-            *start_val = *start_val + 1;
-            bits_N_for_comp -= 1;
-        }
-
-        // too few bits to reliably compare, give up
-        if (bits_N_for_comp < 19) {
-            selected_poly = LH2_POLYNOMIAL_ERROR_INDICATOR;  // mark the poly as "wrong"
-            break;
-        }
-    }
-    return selected_poly;
-}
-
-uint64_t _hamming_weight(uint64_t bits_in) {  // TODO: bad name for function? or is it, it might be a good name for a function, because it describes exactly what it does
-    uint64_t weight = bits_in;
-    weight          = weight - ((weight >> 1) & 0x5555555555555555);                         // find # of 1s in every 2-bit block
-    weight          = (weight & 0x3333333333333333) + ((weight >> 2) & 0x3333333333333333);  // find # of 1s in every 4-bit block
-    weight          = (weight + (weight >> 4)) & 0x0F0F0F0F0F0F0F0F;                         // find # of 1s in every 8-bit block
-    weight          = (weight + (weight >> 8)) & 0x00FF00FF00FF00FF;                         // find # of 1s in every 16-bit block
-    weight          = (weight + (weight >> 16)) & 0x0000FFFF0000FFFF;                        // find # of 1s in every 32-bit block
-    weight          = (weight + (weight >> 32));                                             // add the two 32-bit block results together
-    weight          = weight & 0x000000000000007F;                                           // mask final result, max value of 64, 0'b01000000
-    return weight;
-}
-
-uint32_t _reverse_count_p(uint8_t sensor, uint8_t index, uint32_t bits) {
-
-    bits                 = bits & 0x0001FFFF;  // initialize buffer to initial bits, masked
-    uint32_t buffer_down = bits;
-    uint32_t buffer_up   = bits;
-
-    uint32_t count_down      = 0;
-    uint32_t count_up        = 0;
-    uint32_t b17             = 0;
-    uint32_t b1              = 0;
-    uint32_t masked_buff     = 0;
-    uint8_t  hash_index_down = 0;
-    uint8_t  hash_index_up   = 0;
-
-    // Copy const variables (Flash) into local variables (RAM) to speed up execution.
-    uint32_t _end_buffers_local[NUM_LSFR_COUNT_CHECKPOINTS] = { 0 };
-    uint32_t polynomials_local                              = _polynomials[index];
-    for (size_t i = 0; i < NUM_LSFR_COUNT_CHECKPOINTS; i++) {
-        _end_buffers_local[i] = _end_buffers[index][i];
-    }
-
-    while (buffer_up != _end_buffers_local[0])  // do until buffer reaches one of the saved states
-    {
-
-        //
-        // CHECKPOINT CHECKING
-        //
-
-        // Check end_buffer backward count
-        // Lower hash option in the hash table
-        hash_index_down = _end_buffers_hashtable[(buffer_down >> 2) & HASH_TABLE_MASK] & CHECKPOINT_TABLE_MASK_LOW;
-        if (buffer_down == _end_buffers_local[hash_index_down]) {
-            count_down = count_down + 2048 * hash_index_down - 1;
-            _update_lfsr_checkpoints(sensor, index, bits, count_down);
-            return count_down;
-        }
-        // Upper hash option in the hash table
-        hash_index_down = (_end_buffers_hashtable[(buffer_down >> 2) & HASH_TABLE_MASK] & CHECKPOINT_TABLE_MASK_HIGH) >> CHECKPOINT_TABLE_BITS;
-        if (buffer_down == _end_buffers_local[hash_index_down]) {
-            count_down = count_down + 2048 * hash_index_down - 1;
-            _update_lfsr_checkpoints(sensor, index, bits, count_down);
-            return count_down;
-        }
-
-        // Check end_buffer forward count
-        // Lower hash option in the hash table
-        hash_index_up = _end_buffers_hashtable[(buffer_up >> 2) & HASH_TABLE_MASK] & CHECKPOINT_TABLE_MASK_LOW;
-        if (buffer_up == _end_buffers_local[hash_index_up]) {
-            count_up = 2048 * hash_index_up - count_up - 1;
-            _update_lfsr_checkpoints(sensor, index, bits, count_up);
-            return count_up;
-        }
-        // Upper hash option in the hash table
-        hash_index_up = (_end_buffers_hashtable[(buffer_up >> 2) & HASH_TABLE_MASK] & CHECKPOINT_TABLE_MASK_HIGH) >> CHECKPOINT_TABLE_BITS;
-        if (buffer_up == _end_buffers_local[hash_index_up]) {
-            count_up = 2048 * hash_index_up - count_up - 1;
-            _update_lfsr_checkpoints(sensor, index, bits, count_up);
-            return count_up;
-        }
-
-        // Check the dynamical checkpoints, backward
-        if (buffer_down == _lh2_vars[sensor].checkpoint.bits[index][0]) {
-            count_down = count_down + _lh2_vars[sensor].checkpoint.count[index][0];
-            _update_lfsr_checkpoints(sensor, index, bits, count_down);
-            return count_down;
-        }
-        if (buffer_down == _lh2_vars[sensor].checkpoint.bits[index][1]) {
-            count_down = count_down + _lh2_vars[sensor].checkpoint.count[index][1];
-            _update_lfsr_checkpoints(sensor, index, bits, count_down);
-            return count_down;
-        }
-
-        // Check the dynamical checkpoints, forward
-        if (buffer_up == _lh2_vars[sensor].checkpoint.bits[index][0]) {
-            count_up = _lh2_vars[sensor].checkpoint.count[index][0] - count_up;
-            _update_lfsr_checkpoints(sensor, index, bits, count_up);
-            return count_up;
-        }
-        if (buffer_up == _lh2_vars[sensor].checkpoint.bits[index][1]) {
-            count_up = _lh2_vars[sensor].checkpoint.count[index][1] - count_up;
-            _update_lfsr_checkpoints(sensor, index, bits, count_up);
-            return count_up;
-        }
-
-        //
-        // LSFR UPDATE
-        //
-        // LSFR backward update
-        b17         = buffer_down & 0x00000001;                                                      // save the "newest" bit of the buffer
-        buffer_down = (buffer_down & (0x0001FFFE)) >> 1;                                             // shift the buffer right, backwards in time
-        masked_buff = (buffer_down) & (polynomials_local);                                           // mask the buffer w/ the selected polynomial
-        buffer_down = buffer_down | (((__builtin_popcount(masked_buff) ^ b17) & 0x00000001) << 16);  // This weird line propagates the LSFR one bit into the past
-        count_down++;
-
-        // LSFR forward update
-        b1        = __builtin_popcount(buffer_up & polynomials_local) & 0x01;  // mask the buffer w/ the selected polynomial
-        buffer_up = ((buffer_up << 1) | b1) & (0x0001FFFF);
-        count_up++;
-    }
-    return count_up;
 }
 
 void _add_to_ts4231_ring_buffer(lh2_ring_buffer_t *cb, uint8_t *data, absolute_time_t timestamp) {
@@ -1043,32 +512,11 @@ bool _get_from_ts4231_ring_buffer(lh2_ring_buffer_t *cb, uint8_t *data, absolute
     return true;
 }
 
-void _fill_hash_table(uint16_t *hash_table) {
-
-    // Iterate over all the checkpoints and save the HASH_TABLE_BITS 11 bits as a a index for the hashtable
-    for (size_t poly = 0; poly < LH2_POLYNOMIAL_COUNT; poly++) {
-        for (size_t checkpoint = 1; checkpoint < NUM_LSFR_COUNT_CHECKPOINTS; checkpoint++) {
-            if (hash_table[(_end_buffers[poly][checkpoint] >> 2) & HASH_TABLE_MASK] == 0) {  // We shift by 2 to the right because we precomputed that that hash has the least amount of collisions in the hash table
-
-                hash_table[(_end_buffers[poly][checkpoint] >> 2) & HASH_TABLE_MASK] = checkpoint & CHECKPOINT_TABLE_MASK_LOW;  // that element of the hash table is empty, copy the checkpoint into the lower 6 bits
-            } else {
-                hash_table[(_end_buffers[poly][checkpoint] >> 2) & HASH_TABLE_MASK] |= (checkpoint << CHECKPOINT_TABLE_BITS) & CHECKPOINT_TABLE_MASK_HIGH;  // If the element is already occupied, use the upper 6 bits
-            }
-        }
-    }
-}
-
-void _update_lfsr_checkpoints(uint8_t sensor, uint8_t polynomial, uint32_t bits, uint32_t count) {
-
-    // Update the current running weighted sum. 75% of old value +25% of new value
-    _lh2_vars[sensor].checkpoint.average = (((_lh2_vars[sensor].checkpoint.average * 3) >> 2) + (count >> 2));
-
-    // Is the new count higher or lower than the current running average.
-    uint8_t index = count <= _lh2_vars[sensor].checkpoint.average ? 0 : 1;
+void _update_lfsr_checkpoints(uint8_t sensor, uint8_t polynomial, uint32_t bits, uint32_t count, uint8_t sweep) {
 
     // Save the new count in the correct place in the checkpoint array
-    _lh2_vars[sensor].checkpoint.bits[polynomial][index]  = bits;
-    _lh2_vars[sensor].checkpoint.count[polynomial][index] = count;
+    _lh2_vars[sensor].checkpoint.bits[polynomial][sweep]  = bits;
+    _lh2_vars[sensor].checkpoint.count[polynomial][sweep] = count;
 }
 
 uint8_t _select_sweep(db_lh2_t *lh2, uint8_t polynomial, absolute_time_t timestamp) {
