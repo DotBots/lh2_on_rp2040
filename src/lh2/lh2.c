@@ -27,14 +27,14 @@
 
 //=========================== defines =========================================
 
-#define TS4231_SENSOR_QTY                      4                                                              ///< Max amount of TS4231 sensors the library supports
-#define TS4231_CAPTURE_BUFFER_SIZE             64                                                             ///< Size of buffers used for SPI communications
-#define LH2_LOCATION_ERROR_INDICATOR           0xFFFFFFFF                                                     ///< indicate the location value is false
-#define LH2_POLYNOMIAL_ERROR_INDICATOR         0xFF                                                           ///< indicate the polynomial index is invalid
-#define LH2_BUFFER_SIZE                        10                                                             ///< Amount of lh2 frames the buffer can contain
-#define LH2_MAX_DATA_VALID_TIME_US             2000000                                                        //< Data older than this is considered outdate and should be erased (in microseconds)
-#define LH2_SWEEP_PERIOD_US                    20000                                                          ///< time, in microseconds, between two full rotations of the LH2 motor
-#define LH2_SWEEP_PERIOD_THRESHOLD_US          1000                                                           ///< How close a LH2 pulse must arrive relative to LH2_SWEEP_PERIOD_US, to be considered the same type of sweep (first sweep or second second). (in microseconds)
+#define TS4231_SENSOR_QTY              4           ///< Max amount of TS4231 sensors the library supports
+#define TS4231_CAPTURE_BUFFER_SIZE     64          ///< Size of buffers used for SPI communications
+#define LH2_LOCATION_ERROR_INDICATOR   0xFFFFFFFF  ///< indicate the location value is false
+#define LH2_POLYNOMIAL_ERROR_INDICATOR 0xFF        ///< indicate the polynomial index is invalid
+#define LH2_BUFFER_SIZE                10          ///< Amount of lh2 frames the buffer can contain
+#define LH2_MAX_DATA_VALID_TIME_US     2000000     //< Data older than this is considered outdate and should be erased (in microseconds)
+#define LH2_SWEEP_PERIOD_US            20000       ///< time, in microseconds, between two full rotations of the LH2 motor
+#define LH2_SWEEP_PERIOD_THRESHOLD_US  1000        ///< How close a LH2 pulse must arrive relative to LH2_SWEEP_PERIOD_US, to be considered the same type of sweep (first sweep or second second). (in microseconds)
 
 // Ring buffer for the ts4231 raw data capture
 typedef struct {
@@ -269,6 +269,14 @@ void db_lh2_process_location(db_lh2_t *lh2) {
     if (!_get_from_ts4231_ring_buffer(&_lh2_vars[sensor].data, temp_spi_bits, &temp_timestamp)) {
         return;
     }
+
+// Check if Qualysis Mocap data is interfering with the SPI capture
+#if defined(LH2_MOCAP_FILTER)
+    if (_check_mocap_interference(temp_spi_bits, TS4231_CAPTURE_BUFFER_SIZE)) {
+        return;  // if a qualysis pulse caused a false spi trigger, leave the function.
+    }
+#endif
+
     // perform the demodulation received packets
     // convert the SPI reading to bits via zero-crossing counter demodulation and differential/biphasic manchester decoding.
     gpio_put(1, 1);
