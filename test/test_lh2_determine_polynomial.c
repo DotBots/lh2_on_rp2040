@@ -19,15 +19,21 @@
 
 // Repeat a template macro 32 times, one time per polynomial index
 #define REPEAT_32(TEST_MACRO)                                    \
-    TEST_MACRO(0) TEST_MACRO(1) TEST_MACRO(2) TEST_MACRO(3)      \
-    TEST_MACRO(4) TEST_MACRO(5) TEST_MACRO(6) TEST_MACRO(7)      \
-    TEST_MACRO(8) TEST_MACRO(9) TEST_MACRO(10) TEST_MACRO(11)    \
     TEST_MACRO(12) TEST_MACRO(13) TEST_MACRO(14) TEST_MACRO(15)  \
     TEST_MACRO(16) TEST_MACRO(17) TEST_MACRO(18) TEST_MACRO(19)  \
     TEST_MACRO(20) TEST_MACRO(21) TEST_MACRO(22) TEST_MACRO(23)  \
     TEST_MACRO(24) TEST_MACRO(25) TEST_MACRO(26) TEST_MACRO(27)  \
     TEST_MACRO(28) TEST_MACRO(29) TEST_MACRO(30) TEST_MACRO(31)
-
+// #define REPEAT_32(TEST_MACRO)                                    \
+//     TEST_MACRO(0) TEST_MACRO(1) TEST_MACRO(2) TEST_MACRO(3)      \
+//     TEST_MACRO(4) TEST_MACRO(5) TEST_MACRO(6) TEST_MACRO(7)      \
+//     TEST_MACRO(8) TEST_MACRO(9) TEST_MACRO(10) TEST_MACRO(11)    \
+//     TEST_MACRO(12) TEST_MACRO(13) TEST_MACRO(14) TEST_MACRO(15)  \
+//     TEST_MACRO(16) TEST_MACRO(17) TEST_MACRO(18) TEST_MACRO(19)  \
+//     TEST_MACRO(20) TEST_MACRO(21) TEST_MACRO(22) TEST_MACRO(23)  \
+//     TEST_MACRO(24) TEST_MACRO(25) TEST_MACRO(26) TEST_MACRO(27)  \
+//     TEST_MACRO(28) TEST_MACRO(29) TEST_MACRO(30) TEST_MACRO(31)
+// 77399
 //=========================== variables ========================================
 
 // the lfsr search is expecting a pointer for the dynamic checkpoints.
