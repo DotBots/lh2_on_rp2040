@@ -1,7 +1,8 @@
 cmake_minimum_required(VERSION 3.12)
 
 # Pull in SDK (must be before project)
-include($ENV{PICO_SDK_PATH}/external/pico_sdk_import.cmake)
+include($ENV{PICO_SDK_PATH}/pico_sdk_init.cmake)
+# include($ENV{PICO_SDK_PATH}/external/pico_sdk_import.cmake)
 
 # Project name
 project(lh2 C CXX ASM)
@@ -15,16 +16,16 @@ pico_sdk_init()
 
 add_executable(${PROJECT_NAME}
         src/main.c
-        # src/lh2/lh2.c
+        src/lh2/lh2.c
         )
+
+# Conver the PIO assembler
+# pico_generate_pio_header(${PROJECT_NAME} ${CMAKE_CURRENT_LIST_DIR}/src/ts4231_capture.pio)
 
 # Add lh2 files
 add_subdirectory(src/lh2)
 target_link_libraries(${PROJECT_NAME} lh2_lib)
-# include_directories(${CMAKE_SOURCE_DIR}/src/lh2)
-        
-# Conver the PIO assembler
-pico_generate_pio_header(${PROJECT_NAME} ${CMAKE_CURRENT_LIST_DIR}/src/ts4231_capture.pio)
+# include_directories(${CMAKE_SOURCE_DIR}/src/lh2)        
 
 # Make a list of common dependencies
 set(COMMON_LIBS pico_stdlib hardware_pio hardware_dma pico_multicore)

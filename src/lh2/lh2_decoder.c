@@ -83,16 +83,6 @@ uint64_t _hamming_weight(uint64_t bits_in);
  */
 uint32_t _lfsr_index_search(_lfsr_checkpoint_t *checkpoint, uint8_t index, uint32_t bits);
 
-/**
- * @brief checks an SPI capture for signs of Qualysis Mocap pulses interference.
- *        returns true if interference is found, returns false otherwise
- *
- * @param[in] arr: pointer to the array with the SPI capture to check
- * @param[in] size: size of the buffer array to check
- * @return True if interference is found, False otherwise
- */
-bool _check_mocap_interference(uint8_t *arr, uint8_t size);
-
 //=========================== public ===========================================
 
 uint64_t _demodulate_light(uint8_t *sample_buffer) {  // bad input variable name!!
@@ -459,6 +449,85 @@ uint8_t _determine_polynomial(uint64_t chipsH1, int8_t *start_val) {
     }
     return selected_poly;
 }
+
+// uint8_t _determine_polynomial_2(uint64_t input_bits, int8_t *start_val) {
+//     // check which polynomial the bit sequence is part of
+//     // TODO: make function a void and modify memory directly
+
+//     // Handle the edgecase of a full zero input
+//     if (input_bits == 0x00) {
+//         return LH2_POLYNOMIAL_ERROR_INDICATOR;
+//     }
+
+//     *start_val                                    = 8;                               // how many bits to ignore from the START of the sequence (MSB)
+//     uint8_t  end_val                              = 0;                               // how many bits to ignore from the END of the sequence (LSB)
+//     int32_t  bits_N_for_comp                      = 64 - 17 - *start_val - end_val;  // How many bits will be used to comparison. 64bit - start and end offset - 17bit from the sequence extended.
+//     uint64_t bits_to_compare                      = 0;                               // input bit sub-sequence used for the comparison.
+//     uint32_t lfsr_buffer                          = 0;                               // 17 bits sequence that will be extended using the known polynomials
+//     uint64_t predicted_bits[LH2_POLYNOMIAL_COUNT] = { 0 };                           // bits predicted using the known polynomials, based on the input
+//     uint8_t  weights[LH2_POLYNOMIAL_COUNT]        = { 0xFF };                        // score of how well each polynomial matches the input bits (lower the better, 0 is a perfect match)
+//     uint8_t  selected_poly                        = LH2_POLYNOMIAL_ERROR_INDICATOR;  // initialize to error condition
+//     uint8_t  min_weight_idx                       = LH2_POLYNOMIAL_ERROR_INDICATOR;
+//     uint64_t min_weight                           = LH2_POLYNOMIAL_ERROR_INDICATOR;
+//     int32_t  threshold                            = 0;  // we don't tolerate a single bit error between the input bits and the predicted data.
+
+//     // try polynomial vs. first buffer bits
+//     // this search takes 17-bit sequences and runs them forwards through the polynomial LFSRs.
+//     // if the remaining detected bits fit well with the chosen 17-bit sequence and a given polynomial, it is treated as "correct"
+//     // in case of bit errors at the beginning of the capture, the 17-bit sequence is shifted (to a max of 8 bits)
+//     // in case of bit errors at the end of the capture, the ending bits are removed (to a max of
+//     // removing bits reduces the threshold correspondingly, as incorrect packet detection will cause a significant delay in location estimate
+
+//     // run polynomial search on the first capture
+//     while (1) {
+
+//         // Select which 17bit sequence will be used to predict the rest of the sequence
+//         uint64_t mask_lfsr_buffer = 0xFFFF800000000000 >> (*start_val);                        // create a mask in the proper place
+//         mask_lfsr_buffer          = mask_lfsr_buffer & input_bits;                             // apply the mask
+//         lfsr_buffer               = (uint32_t)(mask_lfsr_buffer >> (64 - 17 - (*start_val)));  // Move the masked bit to the right (right justify-them)
+
+//         // TODO: do this math stuff in multiple operations to: (a) make it readable (b) ensure order-of-execution
+//         bits_to_compare = (input_bits & (0xFFFFFFFFFFFFFFFF << (64 - 17 - (*start_val) - bits_N_for_comp)));
+//         // reset the minimum polynomial match found
+//         min_weight_idx = LH2_POLYNOMIAL_ERROR_INDICATOR;
+//         min_weight     = LH2_POLYNOMIAL_ERROR_INDICATOR;
+//         // Check against all the known polynomials
+//         for (uint8_t i = 0; i < LH2_POLYNOMIAL_COUNT; i++) {
+//             predicted_bits[i] = (((_poly_check(_polynomials[i], bit_buffer1, bits_N_for_comp)) << (64 - 17 - (*start_val) - bits_N_for_comp)) | (chipsH1 & (0xFFFFFFFFFFFFFFFF << (64 - (*start_val)))));
+//             weights[i]        = __builtin_popcount(predicted_bits[i] ^ bits_to_compare);
+//             // Keep track of the minimum weight value and which polinimial generated it.
+//             if (weights[i] < min_weight) {
+//                 min_weight_idx = i;
+//                 min_weight     = weights[i];
+//             }
+//         }
+
+//         // If you found a sufficiently good value, then return which polinomial generated it
+//         if (min_weight <= (uint64_t)threshold) {
+//             selected_poly = min_weight_idx;
+//             break;
+//             // match failed, try again removing bits from the end
+//         } else if (*start_val > 8) {
+//             *start_val      = 8;
+//             bits_N_for_comp = bits_N_for_comp - 9;
+//             if (threshold > 2) {
+//                 threshold = threshold - 1;
+//             } else if (threshold == 2) {  // keep threshold at ones, but you're probably screwed with an unlucky bit error
+//                 threshold = 2;
+//             }
+//         } else {
+//             *start_val = *start_val + 1;
+//             bits_N_for_comp -= 1;
+//         }
+
+//         // too few bits to reliably compare, give up
+//         if (bits_N_for_comp < 19) {
+//             selected_poly = LH2_POLYNOMIAL_ERROR_INDICATOR;  // mark the poly as "wrong"
+//             break;
+//         }
+//     }
+//     return selected_poly;
+// }
 
 uint64_t _hamming_weight(uint64_t bits_in) {  // TODO: bad name for function? or is it, it might be a good name for a function, because it describes exactly what it does
     uint64_t weight = bits_in;

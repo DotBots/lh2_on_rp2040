@@ -80,4 +80,14 @@ uint64_t _hamming_weight(uint64_t bits_in);
  */
 uint32_t _lfsr_index_search(_lfsr_checkpoint_t *checkpoints, uint8_t index, uint32_t bits);
 
+/**
+ * @brief checks an SPI capture for signs of Qualysis Mocap pulses interference.
+ *        returns true if interference is found, returns false otherwise
+ *
+ * @param[in] arr: pointer to the array with the SPI capture to check
+ * @param[in] size: size of the buffer array to check
+ * @return True if interference is found, False otherwise
+ */
+bool _check_mocap_interference(uint8_t *arr, uint8_t size);
+
 #endif /* __LH2_DECODER_H_ */
