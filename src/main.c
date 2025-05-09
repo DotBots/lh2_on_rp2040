@@ -117,15 +117,36 @@ int main() {
 
         if (absolute_time_diff_us(timer_0, get_absolute_time()) > TIMER_DELAY_US) {
 
-            printf("sen_0 (%d-%d %d-%d %d-%d %d-%d)   \tsen_1 (%d-%d %d-%d %d-%d %d-%d)   \tsen_2 (%d-%d %d-%d %d-%d %d-%d)   \tsen_3 (%d-%d %d-%d %d-%d %d-%d)\n",
-                   _lh2_0.locations[0][0].selected_polynomial, _lh2_0.locations[0][0].lfsr_location, _lh2_0.locations[1][0].selected_polynomial, _lh2_0.locations[1][0].lfsr_location,
-                   _lh2_0.locations[0][1].selected_polynomial, _lh2_0.locations[0][1].lfsr_location, _lh2_0.locations[1][1].selected_polynomial, _lh2_0.locations[1][1].lfsr_location,
-                   _lh2_1.locations[0][0].selected_polynomial, _lh2_1.locations[0][0].lfsr_location, _lh2_1.locations[1][0].selected_polynomial, _lh2_1.locations[1][0].lfsr_location,
-                   _lh2_1.locations[0][1].selected_polynomial, _lh2_1.locations[0][1].lfsr_location, _lh2_1.locations[1][1].selected_polynomial, _lh2_1.locations[1][1].lfsr_location,
-                   _lh2_2.locations[0][0].selected_polynomial, _lh2_2.locations[0][0].lfsr_location, _lh2_2.locations[1][0].selected_polynomial, _lh2_2.locations[1][0].lfsr_location,
-                   _lh2_2.locations[0][1].selected_polynomial, _lh2_2.locations[0][1].lfsr_location, _lh2_2.locations[1][1].selected_polynomial, _lh2_2.locations[1][1].lfsr_location,
-                   _lh2_3.locations[0][0].selected_polynomial, _lh2_3.locations[0][0].lfsr_location, _lh2_3.locations[1][0].selected_polynomial, _lh2_3.locations[1][0].lfsr_location,
-                   _lh2_3.locations[0][1].selected_polynomial, _lh2_3.locations[0][1].lfsr_location, _lh2_3.locations[1][1].selected_polynomial, _lh2_3.locations[1][1].lfsr_location);
+            // // Print the first two base stations of all 4 sensors
+            // printf("sen_0 (%d-%d %d-%d %d-%d %d-%d)   \tsen_1 (%d-%d %d-%d %d-%d %d-%d)   \tsen_2 (%d-%d %d-%d %d-%d %d-%d)   \tsen_3 (%d-%d %d-%d %d-%d %d-%d)\n",
+            //        _lh2_0.locations[0][0].selected_polynomial, _lh2_0.locations[0][0].lfsr_location, _lh2_0.locations[1][0].selected_polynomial, _lh2_0.locations[1][0].lfsr_location,
+            //        _lh2_0.locations[0][1].selected_polynomial, _lh2_0.locations[0][1].lfsr_location, _lh2_0.locations[1][1].selected_polynomial, _lh2_0.locations[1][1].lfsr_location,
+            //        _lh2_1.locations[0][0].selected_polynomial, _lh2_1.locations[0][0].lfsr_location, _lh2_1.locations[1][0].selected_polynomial, _lh2_1.locations[1][0].lfsr_location,
+            //        _lh2_1.locations[0][1].selected_polynomial, _lh2_1.locations[0][1].lfsr_location, _lh2_1.locations[1][1].selected_polynomial, _lh2_1.locations[1][1].lfsr_location,
+            //        _lh2_2.locations[0][0].selected_polynomial, _lh2_2.locations[0][0].lfsr_location, _lh2_2.locations[1][0].selected_polynomial, _lh2_2.locations[1][0].lfsr_location,
+            //        _lh2_2.locations[0][1].selected_polynomial, _lh2_2.locations[0][1].lfsr_location, _lh2_2.locations[1][1].selected_polynomial, _lh2_2.locations[1][1].lfsr_location,
+            //        _lh2_3.locations[0][0].selected_polynomial, _lh2_3.locations[0][0].lfsr_location, _lh2_3.locations[1][0].selected_polynomial, _lh2_3.locations[1][0].lfsr_location,
+            //        _lh2_3.locations[0][1].selected_polynomial, _lh2_3.locations[0][1].lfsr_location, _lh2_3.locations[1][1].selected_polynomial, _lh2_3.locations[1][1].lfsr_location);
+            
+            // Print the first sweep of all basestations of Sensor 0
+            printf("%d-%d\t%d-%d\t%d-%d\t%d-%d\t%d-%d\t%d-%d\t%d-%d\t%d-%d\t%d-%d\t%d-%d\t%d-%d\t%d-%d\t%d-%d\t%d-%d\t%d-%d\t%d-%d)\n",
+                _lh2_0.locations[0][0].selected_polynomial, _lh2_0.locations[0][0].lfsr_location,
+                _lh2_0.locations[0][1].selected_polynomial, _lh2_0.locations[0][1].lfsr_location,
+                _lh2_0.locations[0][2].selected_polynomial, _lh2_0.locations[0][2].lfsr_location,
+                _lh2_0.locations[0][3].selected_polynomial, _lh2_0.locations[0][3].lfsr_location,
+                _lh2_0.locations[0][4].selected_polynomial, _lh2_0.locations[0][4].lfsr_location,
+                _lh2_0.locations[0][5].selected_polynomial, _lh2_0.locations[0][5].lfsr_location,
+                _lh2_0.locations[0][6].selected_polynomial, _lh2_0.locations[0][6].lfsr_location,
+                _lh2_0.locations[0][7].selected_polynomial, _lh2_0.locations[0][7].lfsr_location,
+                _lh2_0.locations[0][8].selected_polynomial, _lh2_0.locations[0][8].lfsr_location,
+                _lh2_0.locations[0][9].selected_polynomial, _lh2_0.locations[0][9].lfsr_location,
+                _lh2_0.locations[0][10].selected_polynomial, _lh2_0.locations[0][10].lfsr_location,
+                _lh2_0.locations[0][11].selected_polynomial, _lh2_0.locations[0][11].lfsr_location,
+                _lh2_0.locations[0][12].selected_polynomial, _lh2_0.locations[0][12].lfsr_location,
+                _lh2_0.locations[0][13].selected_polynomial, _lh2_0.locations[0][13].lfsr_location,
+                _lh2_0.locations[0][14].selected_polynomial, _lh2_0.locations[0][14].lfsr_location,
+                _lh2_0.locations[0][15].selected_polynomial, _lh2_0.locations[0][15].lfsr_location);
+
             timer_0 = get_absolute_time();
         }
     }
