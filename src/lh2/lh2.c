@@ -33,8 +33,7 @@
 #define LH2_POLYNOMIAL_ERROR_INDICATOR 0xFF        ///< indicate the polynomial index is invalid
 #define LH2_BUFFER_SIZE                10          ///< Amount of lh2 frames the buffer can contain
 #define LH2_MAX_DATA_VALID_TIME_US     2000000     //< Data older than this is considered outdate and should be erased (in microseconds)
-#define LH2_SWEEP_PERIOD_US            20000       ///< time, in microseconds, between two full rotations of the LH2 motor
-#define LH2_SWEEP_PERIOD_THRESHOLD_US  1000        ///< How close a LH2 pulse must arrive relative to LH2_SWEEP_PERIOD_US, to be considered the same type of sweep (first sweep or second second). (in microseconds)
+#define LH2_SWEEP_PERIOD_THRESHOLD_US  1000        ///< How close a LH2 pulse must arrive relative to lh2_sweep_period_us, to be considered the same type of sweep (first sweep or second second). (in microseconds)
 
 // Ring buffer for the ts4231 raw data capture
 typedef struct {
@@ -60,6 +59,26 @@ typedef struct {
 } pio_vars_t;
 
 //=========================== variables ========================================
+
+///< List of rotational periods (in microseconds) of the lighthouse basestation in all its 16 modes.
+static const uint16_t _lh2_sweep_period_us[LH2_BASESTATION_COUNT] = {
+    19979,
+    19938,
+    19854,
+    19771,
+    19729,
+    19646,
+    19604,
+    19563,
+    19521,
+    19354,
+    19146,
+    18979,
+    18896,
+    18771,
+    18604,
+    18479
+};
 
 ///< Encodes in two bits which sweep slot of a particular basestation is empty, (1 means data, 0 means empty)
 typedef enum {
@@ -156,7 +175,7 @@ void db_lh2_init(db_lh2_t *lh2, uint8_t sensor, const uint8_t gpio_d, const uint
     lh2->sensor                    = sensor;                         // store the sensor number inside the public lh2 structure.
 
     for (uint8_t sweep = 0; sweep < LH2_SWEEP_COUNT; sweep++) {
-        for (uint8_t basestation = 0; basestation < LH2_SWEEP_COUNT; basestation++) {
+        for (uint8_t basestation = 0; basestation < LH2_BASESTATION_COUNT; basestation++) {
             lh2->raw_data[sweep][basestation].bits_sweep           = 0;
             lh2->raw_data[sweep][basestation].selected_polynomial  = LH2_POLYNOMIAL_ERROR_INDICATOR;
             lh2->raw_data[sweep][basestation].bit_offset           = 0;
@@ -530,8 +549,10 @@ void _update_lfsr_checkpoints(uint8_t sensor, uint8_t polynomial, uint32_t bits,
 uint8_t _select_sweep(db_lh2_t *lh2, uint8_t polynomial, absolute_time_t timestamp) {
     // TODO: check the exact, per-mode period of each polynomial instead of using a blanket 20ms
 
-    uint8_t         basestation = polynomial >> 1;  ///< each base station uses 2 polynomials. integer dividing by 2 maps the polynomial number to the basestation number.
-    absolute_time_t now         = get_absolute_time();
+    uint8_t         basestation  = polynomial >> 1;  ///< each base station uses 2 polynomials. integer dividing by 2 maps the polynomial number to the basestation number.
+    uint16_t        sweep_period = _lh2_sweep_period_us[basestation];
+    absolute_time_t now          = get_absolute_time();
+
     // check that current data stored is not too old.
     for (size_t sweep = 0; sweep < 2; sweep++) {
         if (absolute_time_diff_us(lh2->timestamps[0][basestation], now) > LH2_MAX_DATA_VALID_TIME_US) {
@@ -562,8 +583,8 @@ uint8_t _select_sweep(db_lh2_t *lh2, uint8_t polynomial, absolute_time_t timesta
         case LH2_SWEEP_FIRST_SLOT_EMPTY:
         {
             // check that the filled slot is not a perfect 20ms match to the new data.
-            int64_t diff = (absolute_time_diff_us(lh2->timestamps[1][basestation], timestamp) % LH2_SWEEP_PERIOD_US);
-            diff         = diff < LH2_SWEEP_PERIOD_US - diff ? diff : LH2_SWEEP_PERIOD_US - diff;
+            int64_t diff = (absolute_time_diff_us(lh2->timestamps[1][basestation], timestamp) % sweep_period);
+            diff         = diff < sweep_period - diff ? diff : sweep_period - diff;
 
             if (diff < LH2_SWEEP_PERIOD_THRESHOLD_US) {
                 // match: use filled slot
@@ -578,8 +599,8 @@ uint8_t _select_sweep(db_lh2_t *lh2, uint8_t polynomial, absolute_time_t timesta
         case LH2_SWEEP_SECOND_SLOT_EMPTY:
         {
             // check that the filled slot is not a perfect 20ms match to the new data.
-            int64_t diff = (absolute_time_diff_us(lh2->timestamps[0][basestation], timestamp) % LH2_SWEEP_PERIOD_US);
-            diff         = diff < LH2_SWEEP_PERIOD_US - diff ? diff : LH2_SWEEP_PERIOD_US - diff;
+            int64_t diff = (absolute_time_diff_us(lh2->timestamps[0][basestation], timestamp) % sweep_period);
+            diff         = diff < sweep_period - diff ? diff : sweep_period - diff;
 
             if (diff < LH2_SWEEP_PERIOD_THRESHOLD_US) {
                 // match: use filled slot
@@ -594,10 +615,10 @@ uint8_t _select_sweep(db_lh2_t *lh2, uint8_t polynomial, absolute_time_t timesta
         case LH2_SWEEP_BOTH_SLOTS_FULL:
         {
             // How far away is this new pulse from the already stored data
-            int64_t diff_0 = (absolute_time_diff_us(lh2->timestamps[0][basestation], timestamp) % LH2_SWEEP_PERIOD_US);
-            diff_0         = diff_0 < LH2_SWEEP_PERIOD_US - diff_0 ? diff_0 : LH2_SWEEP_PERIOD_US - diff_0;
-            int64_t diff_1 = (absolute_time_diff_us(lh2->timestamps[1][basestation], timestamp) % LH2_SWEEP_PERIOD_US);
-            diff_1         = diff_1 < LH2_SWEEP_PERIOD_US - diff_1 ? diff_1 : LH2_SWEEP_PERIOD_US - diff_1;
+            int64_t diff_0 = (absolute_time_diff_us(lh2->timestamps[0][basestation], timestamp) % sweep_period);
+            diff_0         = diff_0 < sweep_period - diff_0 ? diff_0 : sweep_period - diff_0;
+            int64_t diff_1 = (absolute_time_diff_us(lh2->timestamps[1][basestation], timestamp) % sweep_period);
+            diff_1         = diff_1 < sweep_period - diff_1 ? diff_1 : sweep_period - diff_1;
 
             // Use the one that is closest to 20ms
             if (diff_0 <= diff_1) {
