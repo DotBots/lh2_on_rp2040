@@ -1,11 +1,11 @@
-# LH2 Decoder on RP2040
-Valve's Lighthouse v2 positioning system decoder implemented for the RP2040.
+# LH2 Decoder on RP2040/RP2350
+Valve's Lighthouse v2 positioning system decoder implemented for the RP2040/RP2350.
 100% CPU implementation.
 
 4 `TS4231` are connected to a `RP2040`. The MCU receives and decodes data from two LH2 basestations.
 
 <p align="center">
-  <img src="static/hardware_setup.gif" alt="RP2040 with 4 TS4231 receiving pulses from 2 LH2 basestations"  />
+  <img src="static/hardware_setup.gif" alt="Raspberry Pi Pico with 4 TS4231 receiving pulses from 2 LH2 basestations"  />
 </p>
 
 A logic analyser is connected to the system. It shows the arriving data, and how much time it takes the CPU to decode the data.
@@ -47,9 +47,18 @@ All the decoded information gets printed to the serial console in the following 
 
 ## Getting Started
 
-### Circuit Pinout
+### Circuit Schematic
+Required Hardware:
+- 1x Raspberry Pi Pico version 1 or 2. [[Link]](https://www.raspberrypi.com/documentation/microcontrollers/pico-series.html)
+- 4x TS4231 Lighthouse v2 sensors.
+  - Recommended hardware: [TS4231 Breakout Board](https://github.com/DotBots/TS4231-breakout-board)
 
-`TODO`
+Connect the LH2 sensors to the Raspberry Pi Pico as shown in the diagram below.
+
+<p align="center">
+  <img src="static/schematic.png" alt="schematic of how to connect the RP2040 to the 4 TS4231 sensors"  />
+</p>
+
 
 ### Build & Flash the code
 1. Clone the repository and initialize the SDK submodule
