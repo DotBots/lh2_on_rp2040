@@ -26,14 +26,14 @@
 //=========================== defines ==========================================
 
 #define LH2_0_DATA_PIN 10                     // 
-#define LH2_0_ENV_PIN  (LH2_0_DATA_PIN + 1)  // The Envelope pin will be (Data pin + 1)
+#define LH2_0_ENV_PIN  (LH2_0_DATA_PIN + 1)   // The Envelope pin will be (Data pin + 1)
 #define LH2_1_DATA_PIN 12                     // 
-#define LH2_1_ENV_PIN  (LH2_1_DATA_PIN + 1)  // The Envelope pin will be (Data pin + 1)
-#define LH2_2_DATA_PIN 18                    // 
-#define LH2_2_ENV_PIN  (LH2_2_DATA_PIN + 1)  // The Envelope pin will be (Data pin + 1)
-#define LH2_3_DATA_PIN 20                   // 
-#define LH2_3_ENV_PIN  (LH2_3_DATA_PIN + 1)  // The Envelope pin will be (Data pin + 1)
-#define TIMER_DELAY_US 100000
+#define LH2_1_ENV_PIN  (LH2_1_DATA_PIN + 1)   // The Envelope pin will be (Data pin + 1)
+#define LH2_2_DATA_PIN 18                     // 
+#define LH2_2_ENV_PIN  (LH2_2_DATA_PIN + 1)   // The Envelope pin will be (Data pin + 1)
+#define LH2_3_DATA_PIN 20                     // 
+#define LH2_3_ENV_PIN  (LH2_3_DATA_PIN + 1)   // The Envelope pin will be (Data pin + 1)
+#define TIMER_DELAY_US 100000                 // How often the LH2 updates are sent through the serial (in microseconds)
 
 
 
@@ -62,27 +62,12 @@ int main() {
     // configure the clock for 128MHz
     clk_conf_OK = set_sys_clock_khz(128000, true);
 
-    // // power up sensor 1
-    // gpio_init(4);
-    // gpio_set_dir(4, GPIO_OUT);
-    // gpio_put(4, 1);
-
-    // // power up sensor 2
-    // gpio_init(14);
-    // gpio_set_dir(14, GPIO_OUT);
-    // gpio_put(14, 1);
-
-    // // power up sensor 3
-    // gpio_init(20);
-    // gpio_set_dir(20, GPIO_OUT);
-    // gpio_put(20, 1);
-
     // init the USB UART
     stdio_init_all();
     sleep_ms(3000);
     printf("Start code\n");
 
-    // set-up the on-board LED
+    // set-up the on-board LED for the W version of the Raspberry Pi Pico
     // cyw43_arch_init();
     // cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, 1);
 
@@ -93,20 +78,7 @@ int main() {
     // Launch the second core
     multicore_launch_core1(core1_entry);
 
-    // Debug Gpio
-    gpio_init(0);
-    gpio_set_dir(0, GPIO_OUT);
-    gpio_init(1);
-    gpio_set_dir(1, GPIO_OUT);
-    gpio_init(2);
-    gpio_set_dir(2, GPIO_OUT);
-    gpio_init(3);
-    gpio_set_dir(3, GPIO_OUT);
-    gpio_put(0, 1);
-    gpio_put(1, 1);
-    gpio_put(2, 1);
-    gpio_put(3, 1);
-
+    // Start timer 
     timer_0 = get_absolute_time();
 
     while (true) {
