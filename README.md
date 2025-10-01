@@ -56,7 +56,7 @@ Required Hardware:
 Connect the LH2 sensors to the Raspberry Pi Pico as shown in the diagram below.
 
 <p align="center">
-  <img src="static/schematic.png" alt="schematic of how to connect the RP2040 to the 4 TS4231 sensors"  />
+  <img src="static/schematic.png" alt="schematic of how to connect the RP2040 to the 4 TS4231 sensors" width="65%" />
 </p>
 
 
