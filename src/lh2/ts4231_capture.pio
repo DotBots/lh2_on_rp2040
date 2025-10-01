@@ -15,40 +15,37 @@
 ;
 ; This program samples the data line  at 32MHz for exactly 64bytes (512 bits), and shift it out to the RX FIFO.
 
-.side_set 2
-
 .define D 0
 .define E 1
 
     ; prepare a variable to count the 512 bits that need to be sampled
-    set x, 31           side 0x0           ; this is enough for a 32 iteration loop
-    ; set x, 31           side 0x0           ; this is enough for a 32 iteration loop
+    set x, 31                      ; this is enough for a 32 iteration loop
     ; wait for the Envelope line to go down
-    wait 0 pin E        side 0x0
+    wait 0 pin E        
 
 sample_loop:
-    in pins, 1          side 0x1    [3]         ; sample the data line 16 times. you need exactly 4 clock cycles between sample.
-    in pins, 1          side 0x0    [3]         ;
-    in pins, 1          side 0x1    [3]         ;
-    in pins, 1          side 0x0    [3]         ;
-    in pins, 1          side 0x1    [3]         ;
-    in pins, 1          side 0x0    [3]         ;
-    in pins, 1          side 0x1    [3]         ;
-    in pins, 1          side 0x0    [3]         ;
-    in pins, 1          side 0x1    [3]         ;
-    in pins, 1          side 0x0    [3]         ;
-    in pins, 1          side 0x1    [3]         ;
-    in pins, 1          side 0x0    [3]         ;
-    in pins, 1          side 0x1    [3]         ;
-    in pins, 1          side 0x0    [3]         ;
-    in pins, 1          side 0x1    [3]         ;
-    in pins, 1          side 0x0    [2]         ; sample the data line, wait 1 clock cycle less to accomodate the JMP instruction
-    jmp x-- sample_loop  side 0x2         ; go back to sample another bit
+    in pins, 1              [3]         ; sample the data line 16 times. you need exactly 4 clock cycles between sample.
+    in pins, 1              [3]         ;
+    in pins, 1              [3]         ;
+    in pins, 1              [3]         ;
+    in pins, 1              [3]         ;
+    in pins, 1              [3]         ;
+    in pins, 1              [3]         ;
+    in pins, 1              [3]         ;
+    in pins, 1              [3]         ;
+    in pins, 1              [3]         ;
+    in pins, 1              [3]         ;
+    in pins, 1              [3]         ;
+    in pins, 1              [3]         ;
+    in pins, 1              [3]         ;
+    in pins, 1              [3]         ;
+    in pins, 1              [2]         ; sample the data line, wait 1 clock cycle less to accomodate the JMP instruction
+    jmp x-- sample_loop                 ; go back to sample another bit
 
     ; let the system know that a full capture just finished.
-    irq wait 0 rel      side 0x3 
+    irq wait 0 rel      
 
-    wait 1 pin E        side 0x0           ; wait for the line to go up again before  start sampling again
+    wait 1 pin E                   ; wait for the line to go up again before  start sampling again
 
 
 
@@ -65,12 +62,6 @@ static inline void ts4231_capture_program_init(PIO pio, uint sm, uint offset, ui
     // Connect these GPIOs to this PIO block
     pio_gpio_init(pio, pin);
     pio_gpio_init(pio, pin + 1);
-
-    // Config ths side set pin
-    sm_config_set_sideset_pins(&c, pin+2);
-    pio_sm_set_consecutive_pindirs(pio, sm, pin+2, 2, true);
-    pio_gpio_init(pio, pin + 2);
-    pio_gpio_init(pio, pin + 3);
 
     // Shifting to left matches the customary MSB-first ordering of SPI.
     sm_config_set_in_shift(
